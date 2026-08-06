@@ -2,7 +2,7 @@
 
 ![BangScript Logo](!.png)
 
-BangScript is a statically typed systems programming language that compiles to WebAssembly. It features Runtime Bounded Typing (RBT), a novel approach to type safety that bridges static and dynamic typing through explicit, atomic runtime type assertions.
+BangScript is a statically typed language that compiles to WebAssembly. It features Runtime Bounded Typing (RBT), a novel approach to type safety that bridges static and dynamic typing through explicit, atomic runtime type assertions.
 
 > [NOTE] This repository contains the source code for the `bsc` compiler. 
 
