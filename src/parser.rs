@@ -3,7 +3,8 @@
 // Recursive descent parser that transforms a Token stream into an AST.
 // ============================================================================
 
-use crate::lexer::{Token, TokenKind, LexError, Loc};
+use crate::lexer::{Token, TokenKind, Loc};
+use std::collections::HashMap;
 
 // Re-export AST types for convenience
 pub use crate::ast::*;
@@ -277,17 +278,12 @@ impl Parser {
         };
 
         // Guard: `if expr`
-        if self.match_token(&TokenKind::If) || self.check(&TokenKind::Ident) {
-            if let TokenKind::Ident(ref kw) = self.current().kind {
-                if kw == "if" {
-                    self.advance();
-                    let cond = self.parse_expr()?;
-                    return Ok(Pattern::Guarded {
-                        pattern: Box::new(pat),
-                        cond: Box::new(cond),
-                    });
-                }
-            }
+        if self.match_token(&TokenKind::If) {
+            let cond = self.parse_expr()?;
+            return Ok(Pattern::Guarded {
+                pattern: Box::new(pat),
+                cond: Box::new(cond),
+            });
         }
 
         Ok(pat)
