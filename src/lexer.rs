@@ -168,7 +168,7 @@ impl fmt::Display for TokenKind {
             TokenKind::LParen => write!(f, "'('"),
             TokenKind::RParen => write!(f, "')'"),
             TokenKind::LBrace => write!(f, "'{{'"),
-            TokenKind::RBrace => write!(f, "'}'"),
+            TokenKind::RBrace => write!(f, "'}}'"),
             TokenKind::LBracket => write!(f, "'['"),
             TokenKind::RBracket => write!(f, "']'"),
             TokenKind::Newline => write!(f, "newline"),
@@ -455,7 +455,7 @@ impl<'a> Lexer<'a> {
                     'x' => {
                         self.advance();
                         let hex = self.read_hex_escape(2)?;
-                        value.push(char::from_u32(hex).unwrap_or("\u{FFFD}"));
+                        value.push(char::from_u32(hex).unwrap_or('\u{FFFD}'));
                     }
                     'u' => {
                         self.advance();
