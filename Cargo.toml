@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Stefan Dragan <stefan.dragan95@gmail.com>"]
 description = "BangScript compiler — statically typed, RBT-enabled, WASM GC target"
 license = "MIT"
-repository = "https://github.com/stefand-0/bangscript"
+repository = "https://github.com/bang-script/bangscript"
 
 [dependencies]
 
