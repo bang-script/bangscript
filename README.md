@@ -4,6 +4,8 @@
 
 BangScript is a statically typed systems programming language that compiles to WebAssembly. It features Runtime Bounded Typing (RBT), a novel approach to type safety that bridges static and dynamic typing through explicit, atomic runtime type assertions.
 
+> [NOTE] This repository contains the source code for the `bsc` compiler. 
+
 ## What is BangScript?
 
 BangScript is designed for developers who want the safety of static types without the ceremony of traditional type systems. It draws syntax from Lua, TypeScript, and C, but reimagines how type checking works at runtime.
