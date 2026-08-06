@@ -1,7 +1,3 @@
-/*
-Copyright (c) 2026 BangScript and Contributors
---- License: MIT ---
-*/
 // ============================================================================
 // BangScript Lexer
 // Tokenizes .bs source into a stream of rich Tokens with source locations.
@@ -13,7 +9,7 @@ use std::fmt;
 // Token Kinds
 // ============================================================================
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Literals
     Integer(i64),
@@ -171,7 +167,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Pipe => write!(f, "'|'"),
             TokenKind::LParen => write!(f, "'('"),
             TokenKind::RParen => write!(f, "')'"),
-            TokenKind::LBrace => write!(f, "'{'"),
+            TokenKind::LBrace => write!(f, "'{{'"),
             TokenKind::RBrace => write!(f, "'}'"),
             TokenKind::LBracket => write!(f, "'['"),
             TokenKind::RBracket => write!(f, "']'"),
@@ -459,7 +455,7 @@ impl<'a> Lexer<'a> {
                     'x' => {
                         self.advance();
                         let hex = self.read_hex_escape(2)?;
-                        value.push(hex as char);
+                        value.push(char::from_u32(hex).unwrap_or("\u{FFFD}"));
                     }
                     'u' => {
                         self.advance();
@@ -1253,15 +1249,15 @@ output(result)
     fn test_locations() {
         let lexer = Lexer::new("let x = 42\nlet y = 10");
         let tokens = lexer.tokenize().unwrap();
-        
+
         // First 'let' at line 1, col 1
         assert_eq!(tokens[0].loc.line, 1);
         assert_eq!(tokens[0].loc.col, 1);
-        
+
         // 'x' at line 1, col 5
         assert_eq!(tokens[1].loc.line, 1);
         assert_eq!(tokens[1].loc.col, 5);
-        
+
         // Second 'let' at line 2, col 1
         assert_eq!(tokens[5].loc.line, 2);
         assert_eq!(tokens[5].loc.col, 1);
@@ -1271,11 +1267,11 @@ output(result)
     fn test_spans() {
         let lexer = Lexer::new("let x = 42");
         let tokens = lexer.tokenize().unwrap();
-        
+
         // 'let' spans bytes 0-3
         assert_eq!(tokens[0].loc.span.start, 0);
         assert_eq!(tokens[0].loc.span.end, 3);
-        
+
         // '42' spans bytes 8-10
         assert_eq!(tokens[3].loc.span.start, 8);
         assert_eq!(tokens[3].loc.span.end, 10);
