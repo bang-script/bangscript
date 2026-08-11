@@ -41,3 +41,10 @@ Reassigning a variable of type A to a value of type B gives an error:
 | Map<K, V> | key-value pairs |
 | Set<V> | unique values |
 | Unknown | RBT-type, used when type is not known |
+
+# Type Unions:
+
+```ts
+type Number = Integer | Float
+type Maybe<T> = T | nil
+```
