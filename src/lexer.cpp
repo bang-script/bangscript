@@ -232,6 +232,7 @@ void Lexer::identifier_or_keyword() {
     else if (text == "break") type = TokenType::Break;
     else if (text == "catch") type = TokenType::Catch;
     else if (text == "export") type = TokenType::Export;
+    else if (text == "extern") type = TokenType::Extern;
     else if (text == "from") type = TokenType::From;
     else if (text == "quote") type = TokenType::Quote;
     else if (text == "try") type = TokenType::Try;
