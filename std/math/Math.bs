@@ -1,0 +1,601 @@
+const _pi = 3.14159265358979323846264338327950288419716939937510
+const _e = 2.71828182845904523536028747135266249775724709369995
+const _phi = 1.61803398874989484820458683436563811772030917980576
+const _sqrt_2 = 1.41421356237309504880168872420969807856967187537694
+const _sqrt_3 = 1.73205080756887729352744634150587236694280525381038
+const _sqrt_5 = 2.23606797749978969640917366873127623544061835961152
+const _sqrt_pi = 1.77245385090551602729816748334114518279754945612238
+const _ln_2 = 0.69314718055994530941723212145817656807550013436025
+const _ln_10 = 2.30258509299404568401799145468436420760110148862877
+const _log2_e = 1.44269504088896340735992468100189213742664595415299
+const _log10_e = 0.43429448190325182765112891891660508229439700580367
+const _pi_2 = 1.57079632679489661923132169163975144209858469968755
+const _pi_4 = 0.78539816339744830961566084581987572104929234984378
+const _1_pi = 0.31830988618379067153776752674502872406891929148091
+const _2_pi = 6.28318530717958647692528676655900576839433879875021
+const _pi_sq = 9.86960440108935861883449099987615113531369940724079
+const _euler_mascheroni = 0.57721566490153286060651209008240243104215933593992
+const _catalan = 0.91596559417721901505460351493238411077414937428167
+const _apery = 1.20205690315959428539973816151144999076498629234050
+const _glaisher_kinkelin = 1.28242712910062263687534256886979172776768892732500
+const _deg_rad = 0.017453292519943295769236907684886127134428718885417
+const _rad_deg = 57.295779513082320876798154814105170332405472466564
+
+fn abs(x :: Float) :: Float {
+  if x < 0 {
+    return -x
+  }
+  return x
+}
+
+fn floor(x :: Float) :: Float {
+  let n = trunc(x)
+  if x < 0 && n != x {
+    return n - 1
+  }
+  return n
+}
+
+fn ceil(x :: Float) :: Float {
+  let n = trunc(x)
+  if x > 0 && n != x {
+    return n + 1
+  }
+  return n
+}
+
+fn round(x :: Float) :: Float {
+  if x < 0 {
+    return trunc(x - 0.5)
+  }
+  return trunc(x + 0.5)
+}
+
+fn trunc(x :: Float) :: Float {
+  return x - frac(x)
+}
+
+fn frac(x :: Float) :: Float {
+  return x - floor(x)
+}
+
+fn sign(x :: Float) :: Float {
+  if x > 0 {
+    return 1.0
+  }
+  if x < 0 {
+    return -1.0
+  }
+  return 0.0
+}
+
+fn clamp(x :: Float, lo :: Float, hi :: Float) :: Float {
+  if x < lo {
+    return lo
+  }
+  if x > hi {
+    return hi
+  }
+  return x
+}
+
+fn lerp(a :: Float, b :: Float, t :: Float) :: Float {
+  return a + (b - a) * t
+}
+
+fn map(x :: Float, a1 :: Float, a2 :: Float, b1 :: Float, b2 :: Float) :: Float {
+  return b1 + (x - a1) * (b2 - b1) / (a2 - a1)
+}
+
+fn mod(a :: Float, b :: Float) :: Float {
+  return a - b * floor(a / b)
+}
+
+fn rem(a :: Float, b :: Float) :: Float {
+  return a - b * trunc(a / b)
+}
+
+fn sqrt(x :: Float) :: Float {
+  if x < 0 {
+    return Error("sqrt: negative input")
+  }
+  if x == 0 {
+    return 0.0
+  }
+  let guess = x
+  for _ in 0..20 {
+    guess = 0.5 * (guess + x / guess)
+  }
+  return guess
+}
+
+fn cbrt(x :: Float) :: Float {
+  if x == 0 {
+    return 0.0
+  }
+  let guess = x
+  for _ in 0..20 {
+    guess = (2.0 * guess + x / (guess * guess)) / 3.0
+  }
+  return guess
+}
+
+fn pow(x :: Float, y :: Float) :: Float {
+  if y == 0.0 {
+    return 1.0
+  }
+  if y == 1.0 {
+    return x
+  }
+  if y == 2.0 {
+    return x * x
+  }
+  if y == 3.0 {
+    return x * x * x
+  }
+  if y == 0.5 {
+    return sqrt(x)
+  }
+  if y == -1.0 {
+    return 1.0 / x
+  }
+  return exp(y * log(x))
+}
+
+fn exp(x :: Float) :: Float {
+  let k = floor(x / _ln_2)
+  let r = x - k * _ln_2
+  let sum = 1.0
+  let term = 1.0
+  for n in 1..20 {
+    term = term * r / n
+    sum = sum + term
+  }
+  return sum * pow(2.0, k)
+}
+
+fn exp2(x :: Float) :: Float {
+  return exp(x * _ln_2)
+}
+
+fn log(x :: Float) :: Float {
+  if x <= 0 {
+    return Error("log: non-positive input")
+  }
+  let n = 0
+  let a = x
+  while a >= 2.0 {
+    a = a / 2.0
+    n = n + 1
+  }
+  while a < 1.0 {
+    a = a * 2.0
+    n = n - 1
+  }
+  let y = (a - 1.0) / (a + 1.0)
+  let y2 = y * y
+  let sum = 0.0
+  let term = y
+  for i in 1..30 {
+    sum = sum + term / (2 * i - 1)
+    term = term * y2
+  }
+  return 2.0 * sum + n * _ln_2
+}
+
+fn log2(x :: Float) :: Float {
+  return log(x) / _ln_2
+}
+
+fn log10(x :: Float) :: Float {
+  return log(x) / _ln_10
+}
+
+fn log1p(x :: Float) :: Float {
+  if abs(x) < 0.0001 {
+    let sum = 0.0
+    let term = x
+    let sign = 1.0
+    for n in 1..20 {
+      sum = sum + sign * term / n
+      term = term * x
+      sign = -sign
+    }
+    return sum
+  }
+  return log(1.0 + x)
+}
+
+fn expm1(x :: Float) :: Float {
+  if abs(x) < 0.0001 {
+    let sum = 0.0
+    let term = x
+    for n in 1..20 {
+      sum = sum + term / factorial(n)
+      term = term * x
+    }
+    return sum
+  }
+  return exp(x) - 1.0
+}
+
+fn sin(x :: Float) :: Float {
+  let x2 = mod(x, _2_pi)
+  if x2 > _pi {
+    x2 = x2 - _2_pi
+  }
+  if x2 < -_pi {
+    x2 = x2 + _2_pi
+  }
+  let sum = 0.0
+  let term = x2
+  let sign = 1.0
+  for n in 0..15 {
+    let fact = factorial(2 * n + 1)
+    sum = sum + sign * term / fact
+    term = term * x2 * x2
+    sign = -sign
+  }
+  return sum
+}
+
+fn cos(x :: Float) :: Float {
+  return sin(x + _pi_2)
+}
+
+fn tan(x :: Float) :: Float {
+  return sin(x) / cos(x)
+}
+
+fn asin(x :: Float) :: Float {
+  if x < -1.0 || x > 1.0 {
+    return Error("asin: out of domain")
+  }
+  if x == 1.0 {
+    return _pi_2
+  }
+  if x == -1.0 {
+    return -_pi_2
+  }
+  return atan(x / sqrt(1.0 - x * x))
+}
+
+fn acos(x :: Float) :: Float {
+  return _pi_2 - asin(x)
+}
+
+fn atan(x :: Float) :: Float {
+  if x == 0.0 {
+    return 0.0
+  }
+  if x > 1.0 {
+    return _pi_2 - atan(1.0 / x)
+  }
+  if x < -1.0 {
+    return -_pi_2 - atan(1.0 / x)
+  }
+  let x2 = x * x
+  let sum = 0.0
+  let term = x
+  let sign = 1.0
+  for n in 0..20 {
+    sum = sum + sign * term / (2 * n + 1)
+    term = term * x2
+    sign = -sign
+  }
+  return sum
+}
+
+fn atan2(y :: Float, x :: Float) :: Float {
+  if x > 0 {
+    return atan(y / x)
+  }
+  if x < 0 && y >= 0 {
+    return atan(y / x) + _pi
+  }
+  if x < 0 && y < 0 {
+    return atan(y / x) - _pi
+  }
+  if x == 0 && y > 0 {
+    return _pi_2
+  }
+  if x == 0 && y < 0 {
+    return -_pi_2
+  }
+  return 0.0
+}
+
+fn sinh(x :: Float) :: Float {
+  return (exp(x) - exp(-x)) / 2.0
+}
+
+fn cosh(x :: Float) :: Float {
+  return (exp(x) + exp(-x)) / 2.0
+}
+
+fn tanh(x :: Float) :: Float {
+  return sinh(x) / cosh(x)
+}
+
+fn asinh(x :: Float) :: Float {
+  return log(x + sqrt(x * x + 1.0))
+}
+
+fn acosh(x :: Float) :: Float {
+  if x < 1.0 {
+    return Error("acosh: out of domain")
+  }
+  return log(x + sqrt(x * x - 1.0))
+}
+
+fn atanh(x :: Float) :: Float {
+  if x <= -1.0 || x >= 1.0 {
+    return Error("atanh: out of domain")
+  }
+  return 0.5 * log((1.0 + x) / (1.0 - x))
+}
+
+fn deg(x :: Float) :: Float {
+  return x * _rad_deg
+}
+
+fn rad(x :: Float) :: Float {
+  return x * _deg_rad
+}
+
+fn factorial(n :: Integer) :: Integer {
+  if n < 0 {
+    return Error("factorial: negative input")
+  }
+  if n == 0 || n == 1 {
+    return 1
+  }
+  let result = 1
+  for i in 2..=n {
+    result = result * i
+  }
+  return result
+}
+
+fn gamma(x :: Float) :: Float {
+  if x <= 0 && trunc(x) == x {
+    return Error("gamma: pole at non-positive integer")
+  }
+  let g = 7.0
+  let c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+           771.32342877765313, -176.61502916214059, 12.507343278686905,
+           -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7]
+  let z = x
+  if z < 0.5 {
+    return _pi / (sin(_pi * z) * gamma(1.0 - z))
+  }
+  z = z - 1.0
+  let a = c[0]
+  for i in 1..9 {
+    a = a + c[i] / (z + i)
+  }
+  let t = z + g + 0.5
+  return sqrt(_2_pi) * pow(t, z + 0.5) * exp(-t) * a
+}
+
+fn lgamma(x :: Float) :: Float {
+  return log(gamma(x))
+}
+
+fn gcd(a :: Integer, b :: Integer) :: Integer {
+  let aa = abs(a)
+  let bb = abs(b)
+  while bb != 0 {
+    let t = bb
+    bb = mod(aa, bb)
+    aa = t
+  }
+  return aa
+}
+
+fn lcm(a :: Integer, b :: Integer) :: Integer {
+  return abs(a * b) / gcd(a, b)
+}
+
+fn is_prime(n :: Integer) :: Bool {
+  if n < 2 {
+    return false
+  }
+  if n == 2 {
+    return true
+  }
+  if mod(n, 2) == 0 {
+    return false
+  }
+  let i = 3
+  while i * i <= n {
+    if mod(n, i) == 0 {
+      return false
+    }
+    i = i + 2
+  }
+  return true
+}
+
+fn next_prime(n :: Integer) :: Integer {
+  let candidate = n + 1
+  while !is_prime(candidate) {
+    candidate = candidate + 1
+  }
+  return candidate
+}
+
+fn erf(x :: Float) :: Float {
+  let a1 = 0.254829592
+  let a2 = -0.284496736
+  let a3 = 1.421413741
+  let a4 = -1.453152027
+  let a5 = 1.061405429
+  let p = 0.3275911
+  let sign = if x < 0 { -1.0 } else { 1.0 }
+  let ax = abs(x)
+  let t = 1.0 / (1.0 + p * ax)
+  let y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * exp(-ax * ax)
+  return sign * y
+}
+
+fn erfc(x :: Float) :: Float {
+  return 1.0 - erf(x)
+}
+
+fn beta(a :: Float, b :: Float) :: Float {
+  return gamma(a) * gamma(b) / gamma(a + b)
+}
+
+fn hypot(x :: Float, y :: Float) :: Float {
+  let ax = abs(x)
+  let ay = abs(y)
+  if ax > ay {
+    return ax * sqrt(1.0 + (ay / ax) * (ay / ax))
+  }
+  if ay == 0.0 {
+    return 0.0
+  }
+  return ay * sqrt(1.0 + (ax / ay) * (ax / ay))
+}
+
+fn fma(a :: Float, b :: Float, c :: Float) :: Float {
+  return a * b + c
+}
+
+fn is_pow2(n :: Integer) :: Bool {
+  return n > 0 && mod(n, n - 1) == 0
+}
+
+fn next_pow2(n :: Integer) :: Integer {
+  if n <= 1 {
+    return 1
+  }
+  let p = 2
+  while p < n {
+    p = p * 2
+  }
+  return p
+}
+
+fn prev_pow2(n :: Integer) :: Integer {
+  if n < 1 {
+    return 0
+  }
+  let p = 1
+  while p * 2 <= n {
+    p = p * 2
+  }
+  return p
+}
+
+fn popcount(n :: Integer) :: Integer {
+  let count = 0
+  let x = n
+  while x != 0 {
+    x = x & (x - 1)
+    count = count + 1
+  }
+  return count
+}
+
+fn bit_reverse(n :: Integer, bits :: Integer) :: Integer {
+  let result = 0
+  let x = n
+  for _ in 0..bits {
+    result = (result << 1) | (x & 1)
+    x = x >> 1
+  }
+  return result
+}
+
+fn leading_zeroes(n :: Integer) :: Integer {
+  if n == 0 {
+    return 64
+  }
+  let count = 0
+  let x = n
+  while x > 0 {
+    x = x >> 1
+    count = count + 1
+  }
+  return 64 - count
+}
+
+type Complex = {
+  re :: Float,
+  im :: Float,
+}
+
+fn c_abs(z :: Complex) :: Float {
+  return sqrt(z.re * z.re + z.im * z.im)
+}
+
+fn c_arg(z :: Complex) :: Float {
+  return atan2(z.im, z.re)
+}
+
+fn c_conj(z :: Complex) :: Complex {
+  return Complex { re: z.re, im: -z.im }
+}
+
+fn c_add(a :: Complex, b :: Complex) :: Complex {
+  return Complex { re: a.re + b.re, im: a.im + b.im }
+}
+
+fn c_sub(a :: Complex, b :: Complex) :: Complex {
+  return Complex { re: a.re - b.re, im: a.im - b.im }
+}
+
+fn c_mul(a :: Complex, b :: Complex) :: Complex {
+  return Complex {
+    re: a.re * b.re - a.im * b.im,
+    im: a.re * b.im + a.im * b.re,
+  }
+}
+
+fn c_div(a :: Complex, b :: Complex) :: Complex {
+  let denom = b.re * b.re + b.im * b.im
+  return Complex {
+    re: (a.re * b.re + a.im * b.im) / denom,
+    im: (a.im * b.re - a.re * b.im) / denom,
+  }
+}
+
+fn c_exp(z :: Complex) :: Complex {
+  let e = exp(z.re)
+  return Complex { re: e * cos(z.im), im: e * sin(z.im) }
+}
+
+fn c_log(z :: Complex) :: Complex {
+  return Complex { re: log(c_abs(z)), im: c_arg(z) }
+}
+
+fn c_pow(z :: Complex, w :: Complex) :: Complex {
+  return c_exp(c_mul(w, c_log(z)))
+}
+
+fn c_sqrt(z :: Complex) :: Complex {
+  let r = c_abs(z)
+  let theta = c_arg(z) / 2.0
+  return Complex { re: sqrt(r) * cos(theta), im: sqrt(r) * sin(theta) }
+}
+
+export {
+  _pi, _e, _phi, _sqrt_2, _sqrt_3, _sqrt_5, _sqrt_pi,
+  _ln_2, _ln_10, _log2_e, _log10_e, _pi_2, _pi_4,
+  _1_pi, _2_pi, _pi_sq, _euler_mascheroni, _catalan,
+  _apery, _glaisher_kinkelin, _deg_rad, _rad_deg,
+}
+
+export {
+  abs, floor, ceil, round, trunc, frac, sign,
+  clamp, lerp, map, mod, rem,
+  sqrt, cbrt, pow, exp, exp2, log, log2, log10, log1p, expm1,
+  sin, cos, tan, asin, acos, atan, atan2,
+  sinh, cosh, tanh, asinh, acosh, atanh,
+  deg, rad,
+  factorial, gamma, lgamma, gcd, lcm, is_prime, next_prime,
+  erf, erfc, beta, hypot, fma,
+  is_pow2, next_pow2, prev_pow2, popcount, bit_reverse, leading_zeroes,
+}
