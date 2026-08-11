@@ -95,6 +95,7 @@ enum class TokenType {
     Newline,
     Eof,
     Error,
+    Extern,
 };
 
 struct Token {
