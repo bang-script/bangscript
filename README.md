@@ -2,7 +2,7 @@
 
 ![BangScript Logo](!.png)
 
-BangScript is a statically typed language that compiles to WebAssembly. It features Runtime Bounded Typing (RBT), a novel approach to type safety that bridges static and dynamic typing through explicit, atomic runtime type assertions.
+BangScript is a gradually-typed compiled language. It features Runtime Bounded Typing (RBT), a novel approach to type safety that bridges static and dynamic typing through explicit, atomic runtime type assertions.
 
 > [NOTE] This repository contains the source code for the `bsc` compiler. 
 
@@ -12,7 +12,6 @@ BangScript is designed for developers who want the safety of static types withou
 
 The language is expression-oriented: `if`, `match`, `for`, and `while` all return values. Functions are declared with `fn` for named procedures and `ld` for lambdas. Variables use `let` for mutability and `const` for immutability. Type annotations use the `::` postfix operator.
 
-BangScript compiles to WASM GC, leveraging the WebAssembly garbage collection proposal for efficient memory management without a custom runtime. It targets the Component Model for interoperability with other WASM languages.
 
 ## Runtime Bounded Typing
 
@@ -50,7 +49,6 @@ let masked = !~Integer mixed[1]
 | Tail calls | Guaranteed optimization for `ld` |
 | Memory | GC by default, `unsafe` blocks for C interop |
 | Object orientation | None — structs and functions only |
-| Compile target | WASM GC with Component Model |
 
 ## Status
 
