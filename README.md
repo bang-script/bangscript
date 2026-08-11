@@ -27,7 +27,7 @@ RBT operates on the `Unknown` type, which represents values whose type cannot be
 
 The compiler elides RBT checks when types are already statically proven, making them zero-cost in typed contexts.
 
-```bs
+```typescript
 let mixed :: List<Unknown> = [1, "Hello"]
 
 let proved = !String mixed[1]
