@@ -34,7 +34,8 @@ let proved = !String mixed[1]
 // proved = "Hello"
 
 let cantProve = !Integer mixed[1]
-// RBT Error: Cannot prove that "mixed[1]" is of type "Integer"
+// - RBT Error: Cannot prove that "mixed[1]" is of type "Integer"
+// in the case of cantProve of Unknown type
 
 let masked = !~Integer mixed[1]
 // masked = nil
