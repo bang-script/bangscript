@@ -1,20 +1,50 @@
-#include "catch2/catch_test_macros.hpp"
-#include "catch2/matchers/catch_matchers.hpp"
-#include "catch2/matchers/catch_matchers_string.hpp"
-
 #include "lexer.h"
 #include "parser.h"
 #include "ast.h"
 
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
+#include <cstdlib>
+#include <stdexcept>
 
 using namespace bang;
-using Catch::Matchers::ContainsSubstring;
 
 // ---------------------------------------------------------------------------
-// Helper: build token vector from source
+// Simple test framework (no external dependencies)
+// ---------------------------------------------------------------------------
+static int g_tests_run = 0;
+static int g_tests_passed = 0;
+static int g_tests_failed = 0;
+static std::string g_current_test;
+
+#define TEST(name)     void test_##name();     struct test_reg_##name {         test_reg_##name() { register_test(#name, test_##name); }     } g_test_reg_##name;     void test_##name()
+
+struct TestFunc {
+    const char* name;
+    void (*func)();
+};
+
+static std::vector<TestFunc>& test_registry() {
+    static std::vector<TestFunc> reg;
+    return reg;
+}
+
+static void register_test(const char* name, void (*func)()) {
+    test_registry().push_back({name, func});
+}
+
+#define ASSERT(cond)     do {         g_tests_run++;         if (!(cond)) {             std::cerr << "  [FAIL] " << __FILE__ << ":" << __LINE__                       << " Assertion failed: " << #cond << std::endl;             g_tests_failed++;             throw std::runtime_error("assertion failed");         } else {             g_tests_passed++;         }     } while (0)
+
+#define ASSERT_EQ(a, b)     do {         g_tests_run++;         if ((a) != (b)) {             std::cerr << "  [FAIL] " << __FILE__ << ":" << __LINE__                       << " Expected equality of:" << std::endl                       << "    " << #a << " (which is " << (a) << ")" << std::endl                       << "  and " << #b << " (which is " << (b) << ")" << std::endl;             g_tests_failed++;             throw std::runtime_error("assertion failed");         } else {             g_tests_passed++;         }     } while (0)
+
+#define ASSERT_NE(a, b)     do {         g_tests_run++;         if ((a) == (b)) {             std::cerr << "  [FAIL] " << __FILE__ << ":" << __LINE__                       << " Expected inequality. Both are: " << (a) << std::endl;             g_tests_failed++;             throw std::runtime_error("assertion failed");         } else {             g_tests_passed++;         }     } while (0)
+
+#define ASSERT_THROWS(expr)     do {         g_tests_run++;         bool caught = false;         try { expr; }         catch (...) { caught = true; }         if (!caught) {             std::cerr << "  [FAIL] " << __FILE__ << ":" << __LINE__                       << " Expected exception but none thrown: " << #expr << std::endl;             g_tests_failed++;             throw std::runtime_error("assertion failed");         } else {             g_tests_passed++;         }     } while (0)
+
+// ---------------------------------------------------------------------------
+// Helpers
 // ---------------------------------------------------------------------------
 static std::vector<Token> lex(const std::string& src) {
     Lexer lexer(src);
@@ -28,802 +58,817 @@ static std::vector<StmtPtr> parse(const std::string& src) {
 }
 
 static ExprPtr parse_expr(const std::string& src) {
-    auto tokens = lex(src);
-    // Append EOF if not present
-    Parser parser(std::move(tokens));
-    auto stmts = parser.parse();
-    REQUIRE(stmts.size() == 1);
+    auto stmts = parse(src);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* es = dynamic_cast<ExprStmt*>(stmts[0].get());
-    REQUIRE(es != nullptr);
+    ASSERT(es != nullptr);
     return std::move(es->expr);
 }
 
 // ---------------------------------------------------------------------------
-// SECTION 1: Lexer sanity checks (minimal – just enough to trust tokens)
+// SECTION 1: Lexer sanity checks
 // ---------------------------------------------------------------------------
-TEST_CASE("Lexer produces correct token types", "[lexer]") {
+TEST(lexer_produces_correct_token_types) {
     auto toks = lex("let x = 42");
-    REQUIRE(toks.size() == 5); // let, x, =, 42, EOF
-    CHECK(toks[0].type == TokenType::Let);
-    CHECK(toks[1].type == TokenType::Identifier);
-    CHECK(toks[1].lexeme == "x");
-    CHECK(toks[2].type == TokenType::Equal);
-    CHECK(toks[3].type == TokenType::Integer);
-    CHECK(toks[3].lexeme == "42");
-    CHECK(toks[4].type == TokenType::Eof);
+    ASSERT_EQ(toks.size(), 5u);
+    ASSERT_EQ(toks[0].type, TokenType::Let);
+    ASSERT_EQ(toks[1].type, TokenType::Identifier);
+    ASSERT_EQ(toks[1].lexeme, "x");
+    ASSERT_EQ(toks[2].type, TokenType::Equal);
+    ASSERT_EQ(toks[3].type, TokenType::Integer);
+    ASSERT_EQ(toks[3].lexeme, "42");
+    ASSERT_EQ(toks[4].type, TokenType::Eof);
 }
 
-TEST_CASE("Lexer handles newlines", "[lexer]") {
+TEST(lexer_handles_newlines) {
     auto toks = lex("a\nb");
-    REQUIRE(toks.size() == 4); // a, newline, b, EOF
-    CHECK(toks[1].type == TokenType::Newline);
+    ASSERT_EQ(toks.size(), 4u);
+    ASSERT_EQ(toks[1].type, TokenType::Newline);
 }
 
-TEST_CASE("Lexer handles comments", "[lexer]") {
+TEST(lexer_handles_comments) {
     auto toks = lex("42 // answer");
-    REQUIRE(toks.size() == 2); // 42, EOF (comment skipped)
-    CHECK(toks[0].type == TokenType::Integer);
+    ASSERT_EQ(toks.size(), 2u);
+    ASSERT_EQ(toks[0].type, TokenType::Integer);
 }
 
-TEST_CASE("Lexer handles block comments", "[lexer]") {
+TEST(lexer_handles_block_comments) {
     auto toks = lex("/* hello */ 42");
-    REQUIRE(toks.size() == 2);
-    CHECK(toks[0].type == TokenType::Integer);
+    ASSERT_EQ(toks.size(), 2u);
+    ASSERT_EQ(toks[0].type, TokenType::Integer);
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 2: Literal expressions
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse integer literal", "[expr][literal]") {
+TEST(parse_integer_literal) {
     auto e = parse_expr("42");
     auto* lit = dynamic_cast<LiteralExpr*>(e.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->kind == LiteralExpr::Kind::Integer);
-    CHECK(lit->value == "42");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->kind, LiteralExpr::Kind::Integer);
+    ASSERT_EQ(lit->value, "42");
 }
 
-TEST_CASE("Parse float literal", "[expr][literal]") {
+TEST(parse_float_literal) {
     auto e = parse_expr("3.14");
     auto* lit = dynamic_cast<LiteralExpr*>(e.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->kind == LiteralExpr::Kind::Float);
-    CHECK(lit->value == "3.14");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->kind, LiteralExpr::Kind::Float);
+    ASSERT_EQ(lit->value, "3.14");
 }
 
-TEST_CASE("Parse string literal", "[expr][literal]") {
-    auto e = parse_expr("\"hello\"");
+TEST(parse_string_literal) {
+    auto e = parse_expr("\x22hello\x22");
     auto* lit = dynamic_cast<LiteralExpr*>(e.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->kind == LiteralExpr::Kind::String);
-    CHECK(lit->value == "\"hello\"");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->kind, LiteralExpr::Kind::String);
+    ASSERT_EQ(lit->value, "\x22hello\x22");
 }
 
-TEST_CASE("Parse boolean literals", "[expr][literal]") {
+TEST(parse_boolean_literals) {
     {
         auto e = parse_expr("true");
         auto* lit = dynamic_cast<LiteralExpr*>(e.get());
-        REQUIRE(lit != nullptr);
-        CHECK(lit->kind == LiteralExpr::Kind::Bool);
-        CHECK(lit->value == "true");
+        ASSERT(lit != nullptr);
+        ASSERT_EQ(lit->kind, LiteralExpr::Kind::Bool);
+        ASSERT_EQ(lit->value, "true");
     }
     {
         auto e = parse_expr("false");
         auto* lit = dynamic_cast<LiteralExpr*>(e.get());
-        REQUIRE(lit != nullptr);
-        CHECK(lit->kind == LiteralExpr::Kind::Bool);
-        CHECK(lit->value == "false");
+        ASSERT(lit != nullptr);
+        ASSERT_EQ(lit->kind, LiteralExpr::Kind::Bool);
+        ASSERT_EQ(lit->value, "false");
     }
 }
 
-TEST_CASE("Parse nil literal", "[expr][literal]") {
+TEST(parse_nil_literal) {
     auto e = parse_expr("nil");
     auto* lit = dynamic_cast<LiteralExpr*>(e.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->kind == LiteralExpr::Kind::Nil);
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->kind, LiteralExpr::Kind::Nil);
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 3: Identifiers & grouping
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse identifier", "[expr][ident]") {
+TEST(parse_identifier) {
     auto e = parse_expr("foo");
     auto* id = dynamic_cast<IdentExpr*>(e.get());
-    REQUIRE(id != nullptr);
-    CHECK(id->name == "foo");
+    ASSERT(id != nullptr);
+    ASSERT_EQ(id->name, "foo");
 }
 
-TEST_CASE("Parse grouped expression", "[expr][group]") {
+TEST(parse_grouped_expression) {
     auto e = parse_expr("(42)");
     auto* g = dynamic_cast<GroupExpr*>(e.get());
-    REQUIRE(g != nullptr);
+    ASSERT(g != nullptr);
     auto* lit = dynamic_cast<LiteralExpr*>(g->expr.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->value == "42");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->value, "42");
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 4: Unary expressions
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse unary minus", "[expr][unary]") {
+TEST(parse_unary_minus) {
     auto e = parse_expr("-5");
     auto* u = dynamic_cast<UnaryExpr*>(e.get());
-    REQUIRE(u != nullptr);
-    CHECK(u->op == "-");
+    ASSERT(u != nullptr);
+    ASSERT_EQ(u->op, "-");
     auto* lit = dynamic_cast<LiteralExpr*>(u->operand.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->value == "5");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->value, "5");
 }
 
-TEST_CASE("Parse unary bang", "[expr][unary]") {
+TEST(parse_unary_bang) {
     auto e = parse_expr("!true");
     auto* u = dynamic_cast<UnaryExpr*>(e.get());
-    REQUIRE(u != nullptr);
-    CHECK(u->op == "!");
+    ASSERT(u != nullptr);
+    ASSERT_EQ(u->op, "!");
 }
 
-TEST_CASE("Parse unary tilde", "[expr][unary]") {
+TEST(parse_unary_tilde) {
     auto e = parse_expr("~0xFF");
     auto* u = dynamic_cast<UnaryExpr*>(e.get());
-    REQUIRE(u != nullptr);
-    CHECK(u->op == "~");
+    ASSERT(u != nullptr);
+    ASSERT_EQ(u->op, "~");
 }
 
-TEST_CASE("Parse chained unary", "[expr][unary]") {
+TEST(parse_chained_unary) {
     auto e = parse_expr("--5");
     auto* outer = dynamic_cast<UnaryExpr*>(e.get());
-    REQUIRE(outer != nullptr);
-    CHECK(outer->op == "-");
+    ASSERT(outer != nullptr);
+    ASSERT_EQ(outer->op, "-");
     auto* inner = dynamic_cast<UnaryExpr*>(outer->operand.get());
-    REQUIRE(inner != nullptr);
-    CHECK(inner->op == "-");
+    ASSERT(inner != nullptr);
+    ASSERT_EQ(inner->op, "-");
 }
 
 // ---------------------------------------------------------------------------
-// SECTION 5: RBT (Runtime Bounded Type) expressions
+// SECTION 5: RBT expressions
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse prove (!T)", "[expr][rbt]") {
+TEST(parse_prove_rbt) {
     auto e = parse_expr("!Int 42");
     auto* r = dynamic_cast<RbtExpr*>(e.get());
-    REQUIRE(r != nullptr);
-    CHECK(r->op == RbtExpr::Op::Prove);
-    CHECK(r->type_name == "Int");
+    ASSERT(r != nullptr);
+    ASSERT_EQ(r->op, RbtExpr::Op::Prove);
+    ASSERT_EQ(r->type_name, "Int");
     auto* lit = dynamic_cast<LiteralExpr*>(r->operand.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->value == "42");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->value, "42");
 }
 
-TEST_CASE("Parse mask (!~T)", "[expr][rbt]") {
-    auto e = parse_expr("!~String \"x\"");
+TEST(parse_mask_rbt) {
+    auto e = parse_expr("!~String \x22x\x22");
     auto* r = dynamic_cast<RbtExpr*>(e.get());
-    REQUIRE(r != nullptr);
-    CHECK(r->op == RbtExpr::Op::Mask);
-    CHECK(r->type_name == "String");
+    ASSERT(r != nullptr);
+    ASSERT_EQ(r->op, RbtExpr::Op::Mask);
+    ASSERT_EQ(r->type_name, "String");
 }
 
-TEST_CASE("Parse deep prove (!!T)", "[expr][rbt]") {
+TEST(parse_deep_prove_rbt) {
     auto e = parse_expr("!!Float 3.14");
     auto* r = dynamic_cast<RbtExpr*>(e.get());
-    REQUIRE(r != nullptr);
-    CHECK(r->op == RbtExpr::Op::DeepProve);
-    CHECK(r->type_name == "Float");
+    ASSERT(r != nullptr);
+    ASSERT_EQ(r->op, RbtExpr::Op::DeepProve);
+    ASSERT_EQ(r->type_name, "Float");
 }
 
-TEST_CASE("Parse query (?T)", "[expr][rbt]") {
+TEST(parse_query_rbt) {
     auto e = parse_expr("?Bool true");
     auto* r = dynamic_cast<RbtExpr*>(e.get());
-    REQUIRE(r != nullptr);
-    CHECK(r->op == RbtExpr::Op::Query);
-    CHECK(r->type_name == "Bool");
+    ASSERT(r != nullptr);
+    ASSERT_EQ(r->op, RbtExpr::Op::Query);
+    ASSERT_EQ(r->type_name, "Bool");
 }
 
-TEST_CASE("Parse RBT with generic type", "[expr][rbt]") {
+TEST(parse_rbt_with_generic_type) {
     auto e = parse_expr("!List<Int> [1, 2]");
     auto* r = dynamic_cast<RbtExpr*>(e.get());
-    REQUIRE(r != nullptr);
-    CHECK(r->type_name == "List<Int>");
+    ASSERT(r != nullptr);
+    ASSERT_EQ(r->type_name, "List<Int>");
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 6: Binary expressions & precedence
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse simple binary +", "[expr][binary]") {
+TEST(parse_simple_binary_plus) {
     auto e = parse_expr("1 + 2");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "+");
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "+");
     auto* l = dynamic_cast<LiteralExpr*>(b->left.get());
     auto* r = dynamic_cast<LiteralExpr*>(b->right.get());
-    REQUIRE(l != nullptr);
-    REQUIRE(r != nullptr);
-    CHECK(l->value == "1");
-    CHECK(r->value == "2");
+    ASSERT(l != nullptr);
+    ASSERT(r != nullptr);
+    ASSERT_EQ(l->value, "1");
+    ASSERT_EQ(r->value, "2");
 }
 
-TEST_CASE("Parse simple binary *", "[expr][binary]") {
+TEST(parse_simple_binary_mul) {
     auto e = parse_expr("3 * 4");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "*");
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "*");
 }
 
-TEST_CASE("Precedence: * over +", "[expr][binary][precedence]") {
+TEST(precedence_mul_over_plus) {
     auto e = parse_expr("1 + 2 * 3");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "+");
-    // left must be 1
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "+");
     auto* l = dynamic_cast<LiteralExpr*>(b->left.get());
-    REQUIRE(l != nullptr);
-    CHECK(l->value == "1");
-    // right must be (2 * 3)
+    ASSERT(l != nullptr);
+    ASSERT_EQ(l->value, "1");
     auto* inner = dynamic_cast<BinaryExpr*>(b->right.get());
-    REQUIRE(inner != nullptr);
-    CHECK(inner->op == "*");
+    ASSERT(inner != nullptr);
+    ASSERT_EQ(inner->op, "*");
 }
 
-TEST_CASE("Precedence: + over ==", "[expr][binary][precedence]") {
+TEST(precedence_plus_over_eq) {
     auto e = parse_expr("1 + 2 == 3");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "==");
-    // left must be (1 + 2)
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "==");
     auto* left_add = dynamic_cast<BinaryExpr*>(b->left.get());
-    REQUIRE(left_add != nullptr);
-    CHECK(left_add->op == "+");
-    // right must be 3
+    ASSERT(left_add != nullptr);
+    ASSERT_EQ(left_add->op, "+");
     auto* r = dynamic_cast<LiteralExpr*>(b->right.get());
-    REQUIRE(r != nullptr);
-    CHECK(r->value == "3");
+    ASSERT(r != nullptr);
+    ASSERT_EQ(r->value, "3");
 }
 
-TEST_CASE("Precedence: && over ||", "[expr][binary][precedence]") {
+TEST(precedence_and_over_or) {
     auto e = parse_expr("a || b && c");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "||");
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "||");
     auto* right_and = dynamic_cast<BinaryExpr*>(b->right.get());
-    REQUIRE(right_and != nullptr);
-    CHECK(right_and->op == "&&");
+    ASSERT(right_and != nullptr);
+    ASSERT_EQ(right_and->op, "&&");
 }
 
-TEST_CASE("Precedence: == over &&", "[expr][binary][precedence]") {
+TEST(precedence_eq_over_and) {
     auto e = parse_expr("a == b && c == d");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "&&");
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "&&");
     auto* left_eq = dynamic_cast<BinaryExpr*>(b->left.get());
-    REQUIRE(left_eq != nullptr);
-    CHECK(left_eq->op == "==");
+    ASSERT(left_eq != nullptr);
+    ASSERT_EQ(left_eq->op, "==");
     auto* right_eq = dynamic_cast<BinaryExpr*>(b->right.get());
-    REQUIRE(right_eq != nullptr);
-    CHECK(right_eq->op == "==");
+    ASSERT(right_eq != nullptr);
+    ASSERT_EQ(right_eq->op, "==");
 }
 
-TEST_CASE("Right associativity of =", "[expr][binary][associativity]") {
+TEST(right_associativity_of_eq) {
     auto e = parse_expr("a = b = c");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "=");
-    // left is a
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "=");
     auto* l = dynamic_cast<IdentExpr*>(b->left.get());
-    REQUIRE(l != nullptr);
-    CHECK(l->name == "a");
-    // right is (b = c)
+    ASSERT(l != nullptr);
+    ASSERT_EQ(l->name, "a");
     auto* inner = dynamic_cast<BinaryExpr*>(b->right.get());
-    REQUIRE(inner != nullptr);
-    CHECK(inner->op == "=");
+    ASSERT(inner != nullptr);
+    ASSERT_EQ(inner->op, "=");
 }
 
-TEST_CASE("Left associativity of +", "[expr][binary][associativity]") {
+TEST(left_associativity_of_plus) {
     auto e = parse_expr("1 + 2 + 3");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "+");
-    // left is (1 + 2)
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "+");
     auto* left_add = dynamic_cast<BinaryExpr*>(b->left.get());
-    REQUIRE(left_add != nullptr);
-    CHECK(left_add->op == "+");
-    // right is 3
+    ASSERT(left_add != nullptr);
+    ASSERT_EQ(left_add->op, "+");
     auto* r = dynamic_cast<LiteralExpr*>(b->right.get());
-    REQUIRE(r != nullptr);
-    CHECK(r->value == "3");
+    ASSERT(r != nullptr);
+    ASSERT_EQ(r->value, "3");
 }
 
-TEST_CASE("All comparison operators", "[expr][binary]") {
-    for (const char* op : {"==", "!=", "<", ">", "<=", ">="}) {
-        auto src = std::string("1 ") + op + " 2";
+TEST(all_comparison_operators) {
+    const char* ops[] = {"==", "!=", "<", ">", "<=", ">="};
+    for (const char* op : ops) {
+        std::string src = std::string("1 ") + op + " 2";
         auto e = parse_expr(src);
         auto* b = dynamic_cast<BinaryExpr*>(e.get());
-        REQUIRE(b != nullptr);
-        CHECK(b->op == op);
+        ASSERT(b != nullptr);
+        ASSERT_EQ(b->op, op);
     }
 }
 
-TEST_CASE("All arithmetic operators", "[expr][binary]") {
-    for (const char* op : {"+", "-", "*", "/", "%"}) {
-        auto src = std::string("1 ") + op + " 2";
+TEST(all_arithmetic_operators) {
+    const char* ops[] = {"+", "-", "*", "/", "%"};
+    for (const char* op : ops) {
+        std::string src = std::string("1 ") + op + " 2";
         auto e = parse_expr(src);
         auto* b = dynamic_cast<BinaryExpr*>(e.get());
-        REQUIRE(b != nullptr);
-        CHECK(b->op == op);
+        ASSERT(b != nullptr);
+        ASSERT_EQ(b->op, op);
     }
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 7: Postfix expressions
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse function call no args", "[expr][call]") {
+TEST(parse_call_no_args) {
     auto e = parse_expr("foo()");
     auto* c = dynamic_cast<CallExpr*>(e.get());
-    REQUIRE(c != nullptr);
+    ASSERT(c != nullptr);
     auto* callee = dynamic_cast<IdentExpr*>(c->callee.get());
-    REQUIRE(callee != nullptr);
-    CHECK(callee->name == "foo");
-    CHECK(c->args.empty());
+    ASSERT(callee != nullptr);
+    ASSERT_EQ(callee->name, "foo");
+    ASSERT_EQ(c->args.size(), 0u);
 }
 
-TEST_CASE("Parse function call with args", "[expr][call]") {
+TEST(parse_call_with_args) {
     auto e = parse_expr("foo(1, 2, 3)");
     auto* c = dynamic_cast<CallExpr*>(e.get());
-    REQUIRE(c != nullptr);
-    REQUIRE(c->args.size() == 3);
+    ASSERT(c != nullptr);
+    ASSERT_EQ(c->args.size(), 3u);
     for (size_t i = 0; i < 3; ++i) {
         auto* lit = dynamic_cast<LiteralExpr*>(c->args[i].get());
-        REQUIRE(lit != nullptr);
-        CHECK(lit->value == std::to_string(i + 1));
+        ASSERT(lit != nullptr);
+        ASSERT_EQ(lit->value, std::to_string(i + 1));
     }
 }
 
-TEST_CASE("Parse function call with expression args", "[expr][call]") {
+TEST(parse_call_with_expression_args) {
     auto e = parse_expr("foo(a + b)");
     auto* c = dynamic_cast<CallExpr*>(e.get());
-    REQUIRE(c != nullptr);
-    REQUIRE(c->args.size() == 1);
+    ASSERT(c != nullptr);
+    ASSERT_EQ(c->args.size(), 1u);
     auto* arg = dynamic_cast<BinaryExpr*>(c->args[0].get());
-    REQUIRE(arg != nullptr);
-    CHECK(arg->op == "+");
+    ASSERT(arg != nullptr);
+    ASSERT_EQ(arg->op, "+");
 }
 
-TEST_CASE("Parse index expression", "[expr][index]") {
+TEST(parse_index_expression) {
     auto e = parse_expr("arr[0]");
     auto* idx = dynamic_cast<IndexExpr*>(e.get());
-    REQUIRE(idx != nullptr);
+    ASSERT(idx != nullptr);
     auto* target = dynamic_cast<IdentExpr*>(idx->target.get());
-    REQUIRE(target != nullptr);
-    CHECK(target->name == "arr");
+    ASSERT(target != nullptr);
+    ASSERT_EQ(target->name, "arr");
     auto* index_lit = dynamic_cast<LiteralExpr*>(idx->index.get());
-    REQUIRE(index_lit != nullptr);
-    CHECK(index_lit->value == "0");
+    ASSERT(index_lit != nullptr);
+    ASSERT_EQ(index_lit->value, "0");
 }
 
-TEST_CASE("Parse member access", "[expr][member]") {
+TEST(parse_member_access) {
     auto e = parse_expr("obj.field");
     auto* m = dynamic_cast<MemberExpr*>(e.get());
-    REQUIRE(m != nullptr);
-    CHECK(m->name == "field");
+    ASSERT(m != nullptr);
+    ASSERT_EQ(m->name, "field");
     auto* target = dynamic_cast<IdentExpr*>(m->target.get());
-    REQUIRE(target != nullptr);
-    CHECK(target->name == "obj");
+    ASSERT(target != nullptr);
+    ASSERT_EQ(target->name, "obj");
 }
 
-TEST_CASE("Chained member access", "[expr][member]") {
+TEST(chained_member_access) {
     auto e = parse_expr("a.b.c");
     auto* outer = dynamic_cast<MemberExpr*>(e.get());
-    REQUIRE(outer != nullptr);
-    CHECK(outer->name == "c");
+    ASSERT(outer != nullptr);
+    ASSERT_EQ(outer->name, "c");
     auto* inner = dynamic_cast<MemberExpr*>(outer->target.get());
-    REQUIRE(inner != nullptr);
-    CHECK(inner->name == "b");
+    ASSERT(inner != nullptr);
+    ASSERT_EQ(inner->name, "b");
     auto* root = dynamic_cast<IdentExpr*>(inner->target.get());
-    REQUIRE(root != nullptr);
-    CHECK(root->name == "a");
+    ASSERT(root != nullptr);
+    ASSERT_EQ(root->name, "a");
 }
 
-TEST_CASE("Mixed postfix: call then member", "[expr][postfix]") {
+TEST(mixed_postfix_call_then_member) {
     auto e = parse_expr("foo().bar");
     auto* m = dynamic_cast<MemberExpr*>(e.get());
-    REQUIRE(m != nullptr);
-    CHECK(m->name == "bar");
+    ASSERT(m != nullptr);
+    ASSERT_EQ(m->name, "bar");
     auto* c = dynamic_cast<CallExpr*>(m->target.get());
-    REQUIRE(c != nullptr);
+    ASSERT(c != nullptr);
 }
 
-TEST_CASE("Mixed postfix: member then call", "[expr][postfix]") {
+TEST(mixed_postfix_member_then_call) {
     auto e = parse_expr("obj.method(1)");
     auto* c = dynamic_cast<CallExpr*>(e.get());
-    REQUIRE(c != nullptr);
+    ASSERT(c != nullptr);
     auto* m = dynamic_cast<MemberExpr*>(c->callee.get());
-    REQUIRE(m != nullptr);
-    CHECK(m->name == "method");
+    ASSERT(m != nullptr);
+    ASSERT_EQ(m->name, "method");
 }
 
-TEST_CASE("Call with index arg", "[expr][postfix]") {
+TEST(call_with_index_arg) {
     auto e = parse_expr("foo(arr[0])");
     auto* c = dynamic_cast<CallExpr*>(e.get());
-    REQUIRE(c != nullptr);
-    REQUIRE(c->args.size() == 1);
+    ASSERT(c != nullptr);
+    ASSERT_EQ(c->args.size(), 1u);
     auto* idx = dynamic_cast<IndexExpr*>(c->args[0].get());
-    REQUIRE(idx != nullptr);
+    ASSERT(idx != nullptr);
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 8: Complex expression combinations
 // ---------------------------------------------------------------------------
-TEST_CASE("Unary + binary", "[expr][complex]") {
+TEST(unary_plus_binary) {
     auto e = parse_expr("-a + b");
     auto* bop = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(bop != nullptr);
-    CHECK(bop->op == "+");
+    ASSERT(bop != nullptr);
+    ASSERT_EQ(bop->op, "+");
     auto* left_unary = dynamic_cast<UnaryExpr*>(bop->left.get());
-    REQUIRE(left_unary != nullptr);
-    CHECK(left_unary->op == "-");
+    ASSERT(left_unary != nullptr);
+    ASSERT_EQ(left_unary->op, "-");
 }
 
-TEST_CASE("Postfix + binary", "[expr][complex]") {
+TEST(postfix_plus_binary) {
     auto e = parse_expr("a[0] + b[1]");
     auto* bop = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(bop != nullptr);
-    CHECK(bop->op == "+");
+    ASSERT(bop != nullptr);
+    ASSERT_EQ(bop->op, "+");
     auto* left_idx = dynamic_cast<IndexExpr*>(bop->left.get());
-    REQUIRE(left_idx != nullptr);
+    ASSERT(left_idx != nullptr);
     auto* right_idx = dynamic_cast<IndexExpr*>(bop->right.get());
-    REQUIRE(right_idx != nullptr);
+    ASSERT(right_idx != nullptr);
 }
 
-TEST_CASE("Group overrides precedence", "[expr][complex]") {
+TEST(group_overrides_precedence) {
     auto e = parse_expr("(1 + 2) * 3");
     auto* bop = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(bop != nullptr);
-    CHECK(bop->op == "*");
+    ASSERT(bop != nullptr);
+    ASSERT_EQ(bop->op, "*");
     auto* left_group = dynamic_cast<GroupExpr*>(bop->left.get());
-    REQUIRE(left_group != nullptr);
+    ASSERT(left_group != nullptr);
     auto* inner_add = dynamic_cast<BinaryExpr*>(left_group->expr.get());
-    REQUIRE(inner_add != nullptr);
-    CHECK(inner_add->op == "+");
+    ASSERT(inner_add != nullptr);
+    ASSERT_EQ(inner_add->op, "+");
 }
 
-TEST_CASE("Deeply nested expression", "[expr][complex]") {
+TEST(deeply_nested_expression) {
     auto e = parse_expr("a.b[c].d(e, f + g)");
-    // Should parse as: ((a.b)[c]).d(e, f + g)
     auto* call = dynamic_cast<CallExpr*>(e.get());
-    REQUIRE(call != nullptr);
+    ASSERT(call != nullptr);
     auto* member_d = dynamic_cast<MemberExpr*>(call->callee.get());
-    REQUIRE(member_d != nullptr);
-    CHECK(member_d->name == "d");
+    ASSERT(member_d != nullptr);
+    ASSERT_EQ(member_d->name, "d");
     auto* idx = dynamic_cast<IndexExpr*>(member_d->target.get());
-    REQUIRE(idx != nullptr);
+    ASSERT(idx != nullptr);
     auto* member_b = dynamic_cast<MemberExpr*>(idx->target.get());
-    REQUIRE(member_b != nullptr);
-    CHECK(member_b->name == "b");
+    ASSERT(member_b != nullptr);
+    ASSERT_EQ(member_b->name, "b");
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 9: Statements – let
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse let without type", "[stmt][let]") {
+TEST(parse_let_without_type) {
     auto stmts = parse("let x = 42");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* let = dynamic_cast<LetStmt*>(stmts[0].get());
-    REQUIRE(let != nullptr);
-    CHECK(let->name == "x");
-    CHECK(let->has_type == false);
+    ASSERT(let != nullptr);
+    ASSERT_EQ(let->name, "x");
+    ASSERT_EQ(let->has_type, false);
     auto* val = dynamic_cast<LiteralExpr*>(let->value.get());
-    REQUIRE(val != nullptr);
-    CHECK(val->value == "42");
+    ASSERT(val != nullptr);
+    ASSERT_EQ(val->value, "42");
 }
 
-TEST_CASE("Parse let with type", "[stmt][let]") {
+TEST(parse_let_with_type) {
     auto stmts = parse("let x::Int = 42");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* let = dynamic_cast<LetStmt*>(stmts[0].get());
-    REQUIRE(let != nullptr);
-    CHECK(let->name == "x");
-    CHECK(let->has_type == true);
-    CHECK(let->type_name == "Int");
+    ASSERT(let != nullptr);
+    ASSERT_EQ(let->name, "x");
+    ASSERT_EQ(let->has_type, true);
+    ASSERT_EQ(let->type_name, "Int");
 }
 
-TEST_CASE("Parse let with generic type", "[stmt][let]") {
+TEST(parse_let_with_generic_type) {
     auto stmts = parse("let xs::List<Int> = nil");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* let = dynamic_cast<LetStmt*>(stmts[0].get());
-    REQUIRE(let != nullptr);
-    CHECK(let->type_name == "List<Int>");
+    ASSERT(let != nullptr);
+    ASSERT_EQ(let->type_name, "List<Int>");
 }
 
-TEST_CASE("Parse let with expression value", "[stmt][let]") {
+TEST(parse_let_with_expression_value) {
     auto stmts = parse("let sum = a + b");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* let = dynamic_cast<LetStmt*>(stmts[0].get());
-    REQUIRE(let != nullptr);
+    ASSERT(let != nullptr);
     auto* val = dynamic_cast<BinaryExpr*>(let->value.get());
-    REQUIRE(val != nullptr);
-    CHECK(val->op == "+");
+    ASSERT(val != nullptr);
+    ASSERT_EQ(val->op, "+");
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 10: Statements – block
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse empty block", "[stmt][block]") {
+TEST(parse_empty_block) {
     auto stmts = parse("{}");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* block = dynamic_cast<BlockStmt*>(stmts[0].get());
-    REQUIRE(block != nullptr);
-    CHECK(block->stmts.empty());
+    ASSERT(block != nullptr);
+    ASSERT_EQ(block->stmts.size(), 0u);
 }
 
-TEST_CASE("Parse block with single statement", "[stmt][block]") {
+TEST(parse_block_with_single_statement) {
     auto stmts = parse("{ let x = 1 }");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* block = dynamic_cast<BlockStmt*>(stmts[0].get());
-    REQUIRE(block != nullptr);
-    REQUIRE(block->stmts.size() == 1);
+    ASSERT(block != nullptr);
+    ASSERT_EQ(block->stmts.size(), 1u);
     auto* let = dynamic_cast<LetStmt*>(block->stmts[0].get());
-    REQUIRE(let != nullptr);
-    CHECK(let->name == "x");
+    ASSERT(let != nullptr);
+    ASSERT_EQ(let->name, "x");
 }
 
-TEST_CASE("Parse block with multiple statements", "[stmt][block]") {
+TEST(parse_block_with_multiple_statements) {
     auto stmts = parse("{ let x = 1 let y = 2 }");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* block = dynamic_cast<BlockStmt*>(stmts[0].get());
-    REQUIRE(block != nullptr);
-    REQUIRE(block->stmts.size() == 2);
+    ASSERT(block != nullptr);
+    ASSERT_EQ(block->stmts.size(), 2u);
 }
 
-TEST_CASE("Parse block with newlines", "[stmt][block]") {
+TEST(parse_block_with_newlines) {
     auto stmts = parse("{\n  let x = 1\n  let y = 2\n}");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* block = dynamic_cast<BlockStmt*>(stmts[0].get());
-    REQUIRE(block != nullptr);
-    REQUIRE(block->stmts.size() == 2);
+    ASSERT(block != nullptr);
+    ASSERT_EQ(block->stmts.size(), 2u);
 }
 
-TEST_CASE("Parse nested blocks", "[stmt][block]") {
+TEST(parse_nested_blocks) {
     auto stmts = parse("{ { let x = 1 } }");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* outer = dynamic_cast<BlockStmt*>(stmts[0].get());
-    REQUIRE(outer != nullptr);
-    REQUIRE(outer->stmts.size() == 1);
+    ASSERT(outer != nullptr);
+    ASSERT_EQ(outer->stmts.size(), 1u);
     auto* inner = dynamic_cast<BlockStmt*>(outer->stmts[0].get());
-    REQUIRE(inner != nullptr);
-    REQUIRE(inner->stmts.size() == 1);
+    ASSERT(inner != nullptr);
+    ASSERT_EQ(inner->stmts.size(), 1u);
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 11: Statements – expression statement
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse expression statement", "[stmt][exprstmt]") {
+TEST(parse_expression_statement) {
     auto stmts = parse("foo()");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* es = dynamic_cast<ExprStmt*>(stmts[0].get());
-    REQUIRE(es != nullptr);
+    ASSERT(es != nullptr);
     auto* call = dynamic_cast<CallExpr*>(es->expr.get());
-    REQUIRE(call != nullptr);
+    ASSERT(call != nullptr);
 }
 
-TEST_CASE("Parse multiple expression statements", "[stmt][exprstmt]") {
+TEST(parse_multiple_expression_statements) {
     auto stmts = parse("foo()\nbar()");
-    REQUIRE(stmts.size() == 2);
+    ASSERT_EQ(stmts.size(), 2u);
     auto* es1 = dynamic_cast<ExprStmt*>(stmts[0].get());
-    REQUIRE(es1 != nullptr);
+    ASSERT(es1 != nullptr);
     auto* es2 = dynamic_cast<ExprStmt*>(stmts[1].get());
-    REQUIRE(es2 != nullptr);
+    ASSERT(es2 != nullptr);
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 12: Full program / mixed statements
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse mixed statements", "[program]") {
+TEST(parse_mixed_statements) {
     auto stmts = parse("let x = 1\nfoo()\nlet y = 2");
-    REQUIRE(stmts.size() == 3);
-    CHECK(dynamic_cast<LetStmt*>(stmts[0].get()) != nullptr);
-    CHECK(dynamic_cast<ExprStmt*>(stmts[1].get()) != nullptr);
-    CHECK(dynamic_cast<LetStmt*>(stmts[2].get()) != nullptr);
+    ASSERT_EQ(stmts.size(), 3u);
+    ASSERT(dynamic_cast<LetStmt*>(stmts[0].get()) != nullptr);
+    ASSERT(dynamic_cast<ExprStmt*>(stmts[1].get()) != nullptr);
+    ASSERT(dynamic_cast<LetStmt*>(stmts[2].get()) != nullptr);
 }
 
-TEST_CASE("Parse let inside block", "[program]") {
+TEST(parse_let_inside_block) {
     auto stmts = parse("let outer = 1 { let inner = 2 }");
-    REQUIRE(stmts.size() == 2);
-    CHECK(dynamic_cast<LetStmt*>(stmts[0].get()) != nullptr);
-    CHECK(dynamic_cast<BlockStmt*>(stmts[1].get()) != nullptr);
+    ASSERT_EQ(stmts.size(), 2u);
+    ASSERT(dynamic_cast<LetStmt*>(stmts[0].get()) != nullptr);
+    ASSERT(dynamic_cast<BlockStmt*>(stmts[1].get()) != nullptr);
 }
 
-TEST_CASE("Parse block as expression value", "[program]") {
+TEST(parse_block_as_expression_value) {
     auto stmts = parse("let x = { 42 }");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* let = dynamic_cast<LetStmt*>(stmts[0].get());
-    REQUIRE(let != nullptr);
+    ASSERT(let != nullptr);
     auto* block = dynamic_cast<BlockStmt*>(let->value.get());
-    REQUIRE(block != nullptr);
-    REQUIRE(block->stmts.size() == 1);
+    ASSERT(block != nullptr);
+    ASSERT_EQ(block->stmts.size(), 1u);
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 13: Newline handling inside delimiters
 // ---------------------------------------------------------------------------
-TEST_CASE("Newlines ignored inside parentheses", "[newline]") {
+TEST(newlines_ignored_inside_parens) {
     auto e = parse_expr("(\n  1 + 2\n)");
     auto* g = dynamic_cast<GroupExpr*>(e.get());
-    REQUIRE(g != nullptr);
+    ASSERT(g != nullptr);
     auto* inner = dynamic_cast<BinaryExpr*>(g->expr.get());
-    REQUIRE(inner != nullptr);
-    CHECK(inner->op == "+");
+    ASSERT(inner != nullptr);
+    ASSERT_EQ(inner->op, "+");
 }
 
-TEST_CASE("Newlines ignored inside brackets", "[newline]") {
+TEST(newlines_ignored_inside_brackets) {
     auto e = parse_expr("arr[\n  0\n]");
     auto* idx = dynamic_cast<IndexExpr*>(e.get());
-    REQUIRE(idx != nullptr);
+    ASSERT(idx != nullptr);
 }
 
-TEST_CASE("Newlines ignored inside braces", "[newline]") {
+TEST(newlines_ignored_inside_braces) {
     auto stmts = parse("{\n  let x = 1\n  let y = 2\n}");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* block = dynamic_cast<BlockStmt*>(stmts[0].get());
-    REQUIRE(block != nullptr);
-    REQUIRE(block->stmts.size() == 2);
+    ASSERT(block != nullptr);
+    ASSERT_EQ(block->stmts.size(), 2u);
 }
 
-TEST_CASE("Newlines separate top-level statements", "[newline]") {
+TEST(newlines_separate_top_level_statements) {
     auto stmts = parse("foo()\nbar()");
-    REQUIRE(stmts.size() == 2);
+    ASSERT_EQ(stmts.size(), 2u);
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 14: Error cases
 // ---------------------------------------------------------------------------
-TEST_CASE("Error: unexpected token in expression", "[error]") {
+TEST(error_unexpected_token_in_expression) {
     auto tokens = lex("let");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: missing closing paren", "[error]") {
+TEST(error_missing_closing_paren) {
     auto tokens = lex("(1 + 2");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: missing closing bracket", "[error]") {
+TEST(error_missing_closing_bracket) {
     auto tokens = lex("arr[0");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: missing closing brace", "[error]") {
+TEST(error_missing_closing_brace) {
     auto tokens = lex("{ let x = 1");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: let missing variable name", "[error]") {
+TEST(error_let_missing_variable_name) {
     auto tokens = lex("let = 1");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: let missing equals", "[error]") {
+TEST(error_let_missing_equals) {
     auto tokens = lex("let x 1");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: member access without name", "[error]") {
+TEST(error_member_access_without_name) {
     auto tokens = lex("obj.");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: call missing closing paren", "[error]") {
+TEST(error_call_missing_closing_paren) {
     auto tokens = lex("foo(1, 2");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: unexpected end of input", "[error]") {
+TEST(error_unexpected_end_of_input) {
     auto tokens = lex("-");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Error: empty input", "[error]") {
+TEST(error_empty_input) {
     auto tokens = lex("");
     Parser parser(std::move(tokens));
     auto stmts = parser.parse();
-    CHECK(stmts.empty());
+    ASSERT_EQ(stmts.size(), 0u);
 }
 
 // ---------------------------------------------------------------------------
 // SECTION 15: Edge cases
 // ---------------------------------------------------------------------------
-TEST_CASE("Parse single identifier as statement", "[edge]") {
+TEST(parse_single_identifier_as_statement) {
     auto stmts = parse("x");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* es = dynamic_cast<ExprStmt*>(stmts[0].get());
-    REQUIRE(es != nullptr);
+    ASSERT(es != nullptr);
     auto* id = dynamic_cast<IdentExpr*>(es->expr.get());
-    REQUIRE(id != nullptr);
-    CHECK(id->name == "x");
+    ASSERT(id != nullptr);
+    ASSERT_EQ(id->name, "x");
 }
 
-TEST_CASE("Parse single literal as statement", "[edge]") {
+TEST(parse_single_literal_as_statement) {
     auto stmts = parse("42");
-    REQUIRE(stmts.size() == 1);
+    ASSERT_EQ(stmts.size(), 1u);
     auto* es = dynamic_cast<ExprStmt*>(stmts[0].get());
-    REQUIRE(es != nullptr);
+    ASSERT(es != nullptr);
     auto* lit = dynamic_cast<LiteralExpr*>(es->expr.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->value == "42");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->value, "42");
 }
 
-TEST_CASE("Parse deeply nested unary", "[edge]") {
+TEST(parse_deeply_nested_unary) {
     auto e = parse_expr("!!!!x");
     auto* u1 = dynamic_cast<UnaryExpr*>(e.get());
-    REQUIRE(u1 != nullptr);
+    ASSERT(u1 != nullptr);
     auto* u2 = dynamic_cast<UnaryExpr*>(u1->operand.get());
-    REQUIRE(u2 != nullptr);
+    ASSERT(u2 != nullptr);
     auto* u3 = dynamic_cast<UnaryExpr*>(u2->operand.get());
-    REQUIRE(u3 != nullptr);
+    ASSERT(u3 != nullptr);
     auto* u4 = dynamic_cast<UnaryExpr*>(u3->operand.get());
-    REQUIRE(u4 != nullptr);
+    ASSERT(u4 != nullptr);
     auto* id = dynamic_cast<IdentExpr*>(u4->operand.get());
-    REQUIRE(id != nullptr);
-    CHECK(id->name == "x");
+    ASSERT(id != nullptr);
+    ASSERT_EQ(id->name, "x");
 }
 
-TEST_CASE("Parse long binary chain", "[edge]") {
+TEST(parse_long_binary_chain) {
     auto e = parse_expr("1 + 2 + 3 + 4 + 5");
-    // Left-associative, so tree leans left
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "+");
-    // Drill down left side
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "+");
     auto* left = dynamic_cast<BinaryExpr*>(b->left.get());
-    REQUIRE(left != nullptr);
-    CHECK(left->op == "+");
+    ASSERT(left != nullptr);
+    ASSERT_EQ(left->op, "+");
 }
 
-TEST_CASE("Parse scientific notation float", "[edge]") {
+TEST(parse_scientific_notation_float) {
     auto e = parse_expr("1e10");
     auto* lit = dynamic_cast<LiteralExpr*>(e.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->kind == LiteralExpr::Kind::Float);
-    CHECK(lit->value == "1e10");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->kind, LiteralExpr::Kind::Float);
+    ASSERT_EQ(lit->value, "1e10");
 }
 
-TEST_CASE("Parse negative scientific notation", "[edge]") {
+TEST(parse_negative_scientific_notation) {
     auto e = parse_expr("1.5e-3");
     auto* lit = dynamic_cast<LiteralExpr*>(e.get());
-    REQUIRE(lit != nullptr);
-    CHECK(lit->kind == LiteralExpr::Kind::Float);
-    CHECK(lit->value == "1.5e-3");
+    ASSERT(lit != nullptr);
+    ASSERT_EQ(lit->kind, LiteralExpr::Kind::Float);
+    ASSERT_EQ(lit->value, "1.5e-3");
 }
 
-TEST_CASE("Parse empty call with trailing comma (error)", "[edge][error]") {
-    // Parser does NOT allow trailing comma: foo(1,)
+TEST(parse_empty_call_with_trailing_comma_error) {
     auto tokens = lex("foo(1,)");
     Parser parser(std::move(tokens));
-    REQUIRE_THROWS_AS(parser.parse(), std::runtime_error);
+    ASSERT_THROWS(parser.parse());
 }
 
-TEST_CASE("Parse multiple newlines between statements", "[edge]") {
+TEST(parse_multiple_newlines_between_statements) {
     auto stmts = parse("foo()\n\n\nbar()");
-    REQUIRE(stmts.size() == 2);
+    ASSERT_EQ(stmts.size(), 2u);
 }
 
-TEST_CASE("Parse whitespace-only input", "[edge]") {
+TEST(parse_whitespace_only_input) {
     auto stmts = parse("   \n   \n   ");
-    CHECK(stmts.empty());
+    ASSERT_EQ(stmts.size(), 0u);
 }
 
-TEST_CASE("Parse comment-only input", "[edge]") {
+TEST(parse_comment_only_input) {
     auto stmts = parse("// nothing here");
-    CHECK(stmts.empty());
+    ASSERT_EQ(stmts.size(), 0u);
 }
 
-TEST_CASE("Parse block comment in expression", "[edge]") {
+TEST(parse_block_comment_in_expression) {
     auto e = parse_expr("1 /* middle */ + 2");
     auto* b = dynamic_cast<BinaryExpr*>(e.get());
-    REQUIRE(b != nullptr);
-    CHECK(b->op == "+");
+    ASSERT(b != nullptr);
+    ASSERT_EQ(b->op, "+");
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+int main() {
+    std::cout << "=== Running parser tests ===" << std::endl;
+    std::cout << "Registered tests: " << test_registry().size() << std::endl;
+    std::cout << std::endl;
+
+    for (const auto& t : test_registry()) {
+        std::cout << "[RUN ] " << t.name << std::endl;
+        try {
+            t.func();
+            std::cout << "[PASS] " << t.name << std::endl;
+        } catch (const std::exception& e) {
+            std::cout << "[FAIL] " << t.name << " - " << e.what() << std::endl;
+        }
+        std::cout << std::endl;
+    }
+
+    std::cout << "===========================" << std::endl;
+    std::cout << "Total assertions: " << g_tests_run << std::endl;
+    std::cout << "Passed:           " << g_tests_passed << std::endl;
+    std::cout << "Failed:           " << g_tests_failed << std::endl;
+    std::cout << "===========================" << std::endl;
+
+    return g_tests_failed > 0 ? 1 : 0;
 }
