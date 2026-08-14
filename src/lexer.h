@@ -125,9 +125,9 @@ inline std::ostream& operator<<(std::ostream& os, TokenType type) {
         case TokenType::RBracket:   return os << "RBracket";
         case TokenType::Comma:      return os << "Comma";
         case TokenType::Newline:    return os << "Newline";
-        case TokenType::BangString: return os << "BangString";
+        case TokenType::BangType: return os << "BangType";
         case TokenType::BangTildeType: return os << "BangTildeType";
-        case TokenType::QuestionType:  return os << "QuestionType";
+        case TokenType::QueryType:  return os << "QuestionType";
         case TokenType::BangBangType:  return os << "BangBangType";
         default:                    return os << "Unknown";
     }
