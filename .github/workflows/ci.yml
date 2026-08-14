@@ -14,23 +14,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          set -e
-          echo "=== Installing Catch2 ==="
-          # Catch2 v3 is available as a package on Ubuntu 24.04+
-          # For older Ubuntu, we build from source
-          if ! pkg-config --exists catch2-with-main 2>/dev/null; then
-            echo "Catch2 not found via pkg-config, building from source..."
-            git clone --depth 1 --branch v3.4.0 https://github.com/catchorg/Catch2.git /tmp/catch2
-            cd /tmp/catch2
-            cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
-            cmake --build build -j$(nproc)
-            sudo cmake --install build
-            cd -
-          fi
-          echo "=== Dependencies ready ==="
-
       - name: Compile and run tests
         run: |
           set -e
