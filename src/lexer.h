@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <ostream>
 
 namespace bang {
 
@@ -98,6 +99,40 @@ enum class TokenType {
     Error,
     Extern,
 };
+
+inline std::ostream& operator<<(std::ostream& os, TokenType type) {
+    switch (type) {
+        case TokenType::Eof:        return os << "Eof";
+        case TokenType::Integer:    return os << "Integer";
+        case TokenType::Float:      return os << "Float";
+        case TokenType::String:     return os << "String";
+        case TokenType::Identifier: return os << "Identifier";
+        case TokenType::Let:        return os << "Let";
+        case TokenType::Const:      return os << "Const";
+        case TokenType::Fn:         return os << "Fn";
+        case TokenType::Return:     return os << "Return";
+        case TokenType::Plus:       return os << "Plus";
+        case TokenType::Minus:      return os << "Minus";
+        case TokenType::Star:       return os << "Star";
+        case TokenType::Slash:      return os << "Slash";
+        case TokenType::Equal:      return os << "Equal";
+        case TokenType::ColonColon: return os << "ColonColon";
+        case TokenType::LParen:     return os << "LParen";
+        case TokenType::RParen:     return os << "RParen";
+        case TokenType::LBrace:     return os << "LBrace";
+        case TokenType::RBrace:     return os << "RBrace";
+        case TokenType::LBracket:   return os << "LBracket";
+        case TokenType::RBracket:   return os << "RBracket";
+        case TokenType::Comma:      return os << "Comma";
+        case TokenType::Newline:    return os << "Newline";
+        case TokenType::BangString: return os << "BangString";
+        case TokenType::BangTildeType: return os << "BangTildeType";
+        case TokenType::QuestionType:  return os << "QuestionType";
+        case TokenType::BangBangType:  return os << "BangBangType";
+        default:                    return os << "Unknown";
+    }
+}
+
 
 struct Token {
     TokenType type;
