@@ -69,6 +69,12 @@ void Lexer::scan_token() {
                 } else {
                     add_error_token("Expected type name after !~");
                 }
+            } else if (match('!')) {
+                if (is_alpha(peek())) {
+                    rbt_type(TokenType::BangBangType);
+                } else {
+                    add_error_token("Expected type name after !!");
+                }
             } else if (is_alpha(peek())) {
                 rbt_type(TokenType::BangType);
             } else if (match('=')) {

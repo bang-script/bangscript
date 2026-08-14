@@ -9,6 +9,7 @@ fn add(a, b) { return a + b }
 let s = !String "hello"
 let m = !~Integer "nope"
 let q = ?Float 3.14
+let d = !!List<Integer> [[1, 2], [3, 4]]
 )";
 
     bang::Lexer lexer(source);

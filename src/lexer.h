@@ -91,6 +91,7 @@ enum class TokenType {
     Dollar,
     BangType,
     BangTildeType,
+    BangBangType,
     QueryType,
     Newline,
     Eof,
