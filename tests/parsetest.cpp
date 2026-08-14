@@ -54,7 +54,7 @@ TEST_CASE("Lexer produces correct token types", "[lexer]") {
 }
 
 TEST_CASE("Lexer handles newlines", "[lexer]") {
-    auto toks = lex("a\\nb");
+    auto toks = lex("a\nb");
     REQUIRE(toks.size() == 4); // a, newline, b, EOF
     CHECK(toks[1].type == TokenType::Newline);
 }
@@ -91,11 +91,11 @@ TEST_CASE("Parse float literal", "[expr][literal]") {
 }
 
 TEST_CASE("Parse string literal", "[expr][literal]") {
-    auto e = parse_expr("\\"hello\\"");
+    auto e = parse_expr("\"hello\"");
     auto* lit = dynamic_cast<LiteralExpr*>(e.get());
     REQUIRE(lit != nullptr);
     CHECK(lit->kind == LiteralExpr::Kind::String);
-    CHECK(lit->value == "\\"hello\\"");
+    CHECK(lit->value == "\"hello\"");
 }
 
 TEST_CASE("Parse boolean literals", "[expr][literal]") {
@@ -193,7 +193,7 @@ TEST_CASE("Parse prove (!T)", "[expr][rbt]") {
 }
 
 TEST_CASE("Parse mask (!~T)", "[expr][rbt]") {
-    auto e = parse_expr("!~String \\"x\\"");
+    auto e = parse_expr("!~String \"x\"");
     auto* r = dynamic_cast<RbtExpr*>(e.get());
     REQUIRE(r != nullptr);
     CHECK(r->op == RbtExpr::Op::Mask);
@@ -571,7 +571,7 @@ TEST_CASE("Parse block with multiple statements", "[stmt][block]") {
 }
 
 TEST_CASE("Parse block with newlines", "[stmt][block]") {
-    auto stmts = parse("{\\n  let x = 1\\n  let y = 2\\n}");
+    auto stmts = parse("{\n  let x = 1\n  let y = 2\n}");
     REQUIRE(stmts.size() == 1);
     auto* block = dynamic_cast<BlockStmt*>(stmts[0].get());
     REQUIRE(block != nullptr);
@@ -602,7 +602,7 @@ TEST_CASE("Parse expression statement", "[stmt][exprstmt]") {
 }
 
 TEST_CASE("Parse multiple expression statements", "[stmt][exprstmt]") {
-    auto stmts = parse("foo()\\nbar()");
+    auto stmts = parse("foo()\nbar()");
     REQUIRE(stmts.size() == 2);
     auto* es1 = dynamic_cast<ExprStmt*>(stmts[0].get());
     REQUIRE(es1 != nullptr);
@@ -614,7 +614,7 @@ TEST_CASE("Parse multiple expression statements", "[stmt][exprstmt]") {
 // SECTION 12: Full program / mixed statements
 // ---------------------------------------------------------------------------
 TEST_CASE("Parse mixed statements", "[program]") {
-    auto stmts = parse("let x = 1\\nfoo()\\nlet y = 2");
+    auto stmts = parse("let x = 1\nfoo()\nlet y = 2");
     REQUIRE(stmts.size() == 3);
     CHECK(dynamic_cast<LetStmt*>(stmts[0].get()) != nullptr);
     CHECK(dynamic_cast<ExprStmt*>(stmts[1].get()) != nullptr);
@@ -642,7 +642,7 @@ TEST_CASE("Parse block as expression value", "[program]") {
 // SECTION 13: Newline handling inside delimiters
 // ---------------------------------------------------------------------------
 TEST_CASE("Newlines ignored inside parentheses", "[newline]") {
-    auto e = parse_expr("(\\n  1 + 2\\n)");
+    auto e = parse_expr("(\n  1 + 2\n)");
     auto* g = dynamic_cast<GroupExpr*>(e.get());
     REQUIRE(g != nullptr);
     auto* inner = dynamic_cast<BinaryExpr*>(g->expr.get());
@@ -651,13 +651,13 @@ TEST_CASE("Newlines ignored inside parentheses", "[newline]") {
 }
 
 TEST_CASE("Newlines ignored inside brackets", "[newline]") {
-    auto e = parse_expr("arr[\\n  0\\n]");
+    auto e = parse_expr("arr[\n  0\n]");
     auto* idx = dynamic_cast<IndexExpr*>(e.get());
     REQUIRE(idx != nullptr);
 }
 
 TEST_CASE("Newlines ignored inside braces", "[newline]") {
-    auto stmts = parse("{\\n  let x = 1\\n  let y = 2\\n}");
+    auto stmts = parse("{\n  let x = 1\n  let y = 2\n}");
     REQUIRE(stmts.size() == 1);
     auto* block = dynamic_cast<BlockStmt*>(stmts[0].get());
     REQUIRE(block != nullptr);
@@ -665,7 +665,7 @@ TEST_CASE("Newlines ignored inside braces", "[newline]") {
 }
 
 TEST_CASE("Newlines separate top-level statements", "[newline]") {
-    auto stmts = parse("foo()\\nbar()");
+    auto stmts = parse("foo()\nbar()");
     REQUIRE(stmts.size() == 2);
 }
 
@@ -807,12 +807,12 @@ TEST_CASE("Parse empty call with trailing comma (error)", "[edge][error]") {
 }
 
 TEST_CASE("Parse multiple newlines between statements", "[edge]") {
-    auto stmts = parse("foo()\\n\\n\\nbar()");
+    auto stmts = parse("foo()\n\n\nbar()");
     REQUIRE(stmts.size() == 2);
 }
 
 TEST_CASE("Parse whitespace-only input", "[edge]") {
-    auto stmts = parse("   \\n   \\n   ");
+    auto stmts = parse("   \n   \n   ");
     CHECK(stmts.empty());
 }
 
