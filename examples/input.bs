@@ -1,0 +1,10 @@
+fn main() {
+  // You can take input with:
+  // - input()
+
+  let name :: String = input("Name: ")
+  // Lets check if name is not null
+  if name != null {
+    output("Hello, {name}!")
+  } 
+}
