@@ -85,6 +85,21 @@ public:
 };
 
 // ============================================================================
+// FLOW-SENSITIVE RBT: TYPE ASSUMPTIONS
+// ============================================================================
+
+// Represents what we know about a variable's type at a specific program point.
+// Used for flow-sensitive RBT narrowing.
+struct TypeAssumption {
+    std::string var_name;
+    std::shared_ptr<Type> assumed_type;
+    bool is_positive;  // true = we know it IS this type, false = we know it ISN'T
+};
+
+// A set of assumptions active at a given point in the program.
+using AssumptionSet = std::vector<TypeAssumption>;
+
+// ============================================================================
 // SEMANTIC ANALYZER
 // ============================================================================
 
@@ -125,6 +140,9 @@ private:
     bool inside_loop_ = false;
     bool inside_function_ = false;
 
+    // Flow-sensitive assumptions: what we know about variables at current point
+    AssumptionSet current_assumptions_;
+
     // Scope management
     struct ScopeGuard {
         SemanticAnalyzer* analyzer;
@@ -138,12 +156,23 @@ private:
 
     // Core analysis
     void analyze_stmt(const StmtPtr& stmt);
+    void analyze_stmt(const StmtPtr& stmt, const AssumptionSet& assumptions);
     std::shared_ptr<Type> analyze_expr(const ExprPtr& expr);
+    std::shared_ptr<Type> analyze_expr(const ExprPtr& expr, const AssumptionSet& assumptions);
+
+    // Flow-sensitive helpers
+    AssumptionSet extract_positive_assumptions(const ExprPtr& condition);
+    AssumptionSet extract_negative_assumptions(const ExprPtr& condition);
+    std::shared_ptr<Type> get_known_type(const std::string& name, const AssumptionSet& assumptions);
+    AssumptionSet merge_assumptions(const AssumptionSet& a, const AssumptionSet& b);
+    bool assumptions_imply_type(const std::string& name, const std::shared_ptr<Type>& type,
+                                 const AssumptionSet& assumptions);
 
     // Statements
     void analyze_let(const LetStmt& stmt);
     void analyze_expr_stmt(const ExprStmt& stmt);
     void analyze_block(const BlockStmt& stmt);
+    void analyze_block(const BlockStmt& stmt, const AssumptionSet& assumptions);
     void analyze_fn(const FnStmt& stmt);
     void analyze_ld(const LdStmt& stmt);
     void analyze_for(const ForStmt& stmt);
@@ -157,6 +186,7 @@ private:
     // Expressions
     std::shared_ptr<Type> analyze_literal(const LiteralExpr& expr);
     std::shared_ptr<Type> analyze_ident(const IdentExpr& expr);
+    std::shared_ptr<Type> analyze_ident(const IdentExpr& expr, const AssumptionSet& assumptions);
     std::shared_ptr<Type> analyze_unary(const UnaryExpr& expr);
     std::shared_ptr<Type> analyze_binary(const BinaryExpr& expr);
     std::shared_ptr<Type> analyze_call(const CallExpr& expr);
@@ -167,12 +197,15 @@ private:
     std::shared_ptr<Type> analyze_lambda(const LambdaExpr& expr);
     std::shared_ptr<Type> analyze_match_expr(const MatchExpr& expr);
     std::shared_ptr<Type> analyze_rbt(const RbtExpr& expr);
+    std::shared_ptr<Type> analyze_rbt(const RbtExpr& expr, const AssumptionSet& assumptions);
 
     // RBT
     RbtResult compute_rbt_action(
         const std::shared_ptr<Type>& operand_type,
         const std::shared_ptr<Type>& target_type,
-        RbtExpr::Op op
+        RbtExpr::Op op,
+        const AssumptionSet& assumptions,
+        const std::string& operand_name  // for flow-sensitive lookup
     );
 
     // Type helpers
