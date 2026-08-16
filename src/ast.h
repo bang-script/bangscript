@@ -7,18 +7,24 @@
 
 namespace bang {
 
+// ============================================================================
+// FORWARD DECLARATIONS
+// ============================================================================
+
 struct Expr;
+struct Stmt;
 using ExprPtr = std::unique_ptr<Expr>;
+using StmtPtr = std::unique_ptr<Stmt>;
+
+// ============================================================================
+// EXPRESSIONS
+// ============================================================================
 
 struct Expr {
     size_t line = 0;
     size_t column = 0;
     virtual ~Expr() = default;
 };
-
-// ============================================================================
-// EXPRESSIONS
-// ============================================================================
 
 struct LiteralExpr : Expr {
     enum class Kind { Integer, Float, String, Bool, Nil };
@@ -99,9 +105,6 @@ struct MatchExpr : Expr {
 // ============================================================================
 // STATEMENTS
 // ============================================================================
-
-struct Stmt;
-using StmtPtr = std::unique_ptr<Stmt>;
 
 struct Stmt {
     size_t line = 0;
