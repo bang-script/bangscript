@@ -180,6 +180,7 @@ bool SemanticAnalyzer::analyze(const std::vector<StmtPtr>& stmts) {
     current_return_type_ = Type::make(Type::Kind::Unknown);
     inside_loop_ = false;
     inside_function_ = false;
+    current_assumptions_.clear();
 
     // Predefine built-in functions
     auto output_sym = std::make_shared<Symbol>();
@@ -199,16 +200,134 @@ bool SemanticAnalyzer::analyze(const std::vector<StmtPtr>& stmts) {
 }
 
 // ============================================================================
+// FLOW-SENSITIVE ASSUMPTIONS
+// ============================================================================
+
+AssumptionSet SemanticAnalyzer::extract_positive_assumptions(const ExprPtr& condition) {
+    AssumptionSet result;
+
+    // ?Type x  =>  positive assumption: x is Type
+    if (auto rbt = dynamic_cast<RbtExpr*>(condition.get())) {
+        if (rbt->op == RbtExpr::Op::Query) {
+            if (auto ident = dynamic_cast<IdentExpr*>(rbt->operand.get())) {
+                auto target_type = resolve_type(rbt->type_name);
+                result.push_back({ident->name, target_type, true});
+            }
+        }
+    }
+
+    // a && b  =>  union of both
+    if (auto binary = dynamic_cast<BinaryExpr*>(condition.get())) {
+        if (binary->op == "&&") {
+            auto left = extract_positive_assumptions(binary->left);
+            auto right = extract_positive_assumptions(binary->right);
+            result.insert(result.end(), left.begin(), left.end());
+            result.insert(result.end(), right.begin(), right.end());
+        }
+    }
+
+    return result;
+}
+
+AssumptionSet SemanticAnalyzer::extract_negative_assumptions(const ExprPtr& condition) {
+    AssumptionSet result;
+
+    // !(?Type x)  =>  negative assumption: x is NOT Type
+    if (auto unary = dynamic_cast<UnaryExpr*>(condition.get())) {
+        if (unary->op == "!") {
+            return extract_positive_assumptions(unary->operand);
+        }
+    }
+
+    // ?Type x in else branch  =>  negative assumption: x is NOT Type
+    if (auto rbt = dynamic_cast<RbtExpr*>(condition.get())) {
+        if (rbt->op == RbtExpr::Op::Query) {
+            if (auto ident = dynamic_cast<IdentExpr*>(rbt->operand.get())) {
+                auto target_type = resolve_type(rbt->type_name);
+                result.push_back({ident->name, target_type, false});
+            }
+        }
+    }
+
+    return result;
+}
+
+std::shared_ptr<Type> SemanticAnalyzer::get_known_type(
+    const std::string& name,
+    const AssumptionSet& assumptions
+) {
+    // Start with the symbol's declared type
+    auto sym = current_scope_->lookup(name);
+    if (!sym) return Type::make(Type::Kind::Unknown);
+
+    auto base_type = sym->type;
+
+    // Apply positive assumptions
+    for (const auto& ass : assumptions) {
+        if (ass.var_name == name && ass.is_positive) {
+            // We know it's this type — narrow down
+            if (base_type->kind == Type::Kind::Unknown ||
+                base_type->is_subtype_of(ass.assumed_type)) {
+                return ass.assumed_type;
+            }
+        }
+    }
+
+    return base_type;
+}
+
+bool SemanticAnalyzer::assumptions_imply_type(
+    const std::string& name,
+    const std::shared_ptr<Type>& type,
+    const AssumptionSet& assumptions
+) {
+    for (const auto& ass : assumptions) {
+        if (ass.var_name == name && ass.is_positive) {
+            if (ass.assumed_type->is_subtype_of(type) || ass.assumed_type->equals(type)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+AssumptionSet SemanticAnalyzer::merge_assumptions(
+    const AssumptionSet& a,
+    const AssumptionSet& b
+) {
+    // Conservative merge: only keep assumptions that agree in both branches
+    AssumptionSet result;
+    for (const auto& ass_a : a) {
+        for (const auto& ass_b : b) {
+            if (ass_a.var_name == ass_b.var_name &&
+                ass_a.is_positive == ass_b.is_positive &&
+                ass_a.assumed_type->equals(ass_b.assumed_type)) {
+                result.push_back(ass_a);
+            }
+        }
+    }
+    return result;
+}
+
+// ============================================================================
 // STATEMENT DISPATCH
 // ============================================================================
 
 void SemanticAnalyzer::analyze_stmt(const StmtPtr& stmt) {
+    analyze_stmt(stmt, current_assumptions_);
+}
+
+void SemanticAnalyzer::analyze_stmt(const StmtPtr& stmt, const AssumptionSet& assumptions) {
+    // Update current assumptions for this statement
+    auto saved = current_assumptions_;
+    current_assumptions_ = assumptions;
+
     if (auto let = dynamic_cast<LetStmt*>(stmt.get())) {
         analyze_let(*let);
     } else if (auto expr_stmt = dynamic_cast<ExprStmt*>(stmt.get())) {
         analyze_expr_stmt(*expr_stmt);
     } else if (auto block = dynamic_cast<BlockStmt*>(stmt.get())) {
-        analyze_block(*block);
+        analyze_block(*block, assumptions);
     } else if (auto fn = dynamic_cast<FnStmt*>(stmt.get())) {
         analyze_fn(*fn);
     } else if (auto ld = dynamic_cast<LdStmt*>(stmt.get())) {
@@ -228,6 +347,8 @@ void SemanticAnalyzer::analyze_stmt(const StmtPtr& stmt) {
     } else if (auto cont = dynamic_cast<ContinueStmt*>(stmt.get())) {
         analyze_continue(*cont);
     }
+
+    current_assumptions_ = saved;
 }
 
 // ============================================================================
@@ -280,10 +401,17 @@ void SemanticAnalyzer::analyze_expr_stmt(const ExprStmt& stmt) {
 }
 
 void SemanticAnalyzer::analyze_block(const BlockStmt& stmt) {
+    analyze_block(stmt, current_assumptions_);
+}
+
+void SemanticAnalyzer::analyze_block(const BlockStmt& stmt, const AssumptionSet& assumptions) {
     ScopeGuard guard(this, current_scope_.get());
+    auto saved = current_assumptions_;
+    current_assumptions_ = assumptions;
     for (const auto& s : stmt.stmts) {
         analyze_stmt(s);
     }
+    current_assumptions_ = saved;
 }
 
 // ============================================================================
@@ -291,7 +419,6 @@ void SemanticAnalyzer::analyze_block(const BlockStmt& stmt) {
 // ============================================================================
 
 void SemanticAnalyzer::analyze_fn(const FnStmt& stmt) {
-    // Build function type from signature
     std::vector<std::shared_ptr<Type>> param_types;
     for (const auto& p : stmt.params) {
         param_types.push_back(resolve_param_type(p.type_name));
@@ -306,8 +433,6 @@ void SemanticAnalyzer::analyze_fn(const FnStmt& stmt) {
 
     auto fn_type = Type::make_function(std::move(param_types), ret_type);
 
-    // Define the function symbol in current scope BEFORE analyzing body
-    // (allows recursion)
     auto fn_sym = std::make_shared<Symbol>();
     fn_sym->name = stmt.name;
     fn_sym->kind = SymbolKind::Function;
@@ -317,15 +442,15 @@ void SemanticAnalyzer::analyze_fn(const FnStmt& stmt) {
     fn_sym->is_tco = false;
     current_scope_->define(stmt.name, fn_sym);
 
-    // Analyze body in new scope with parameters
     ScopeGuard guard(this, current_scope_.get());
 
     auto saved_return = current_return_type_;
     auto saved_in_fn = inside_function_;
+    auto saved_assumptions = current_assumptions_;
     current_return_type_ = ret_type;
     inside_function_ = true;
+    current_assumptions_.clear();
 
-    // Define parameters
     for (size_t i = 0; i < stmt.params.size(); ++i) {
         auto p = std::make_shared<Symbol>();
         p->name = stmt.params[i].name;
@@ -340,6 +465,7 @@ void SemanticAnalyzer::analyze_fn(const FnStmt& stmt) {
 
     current_return_type_ = saved_return;
     inside_function_ = saved_in_fn;
+    current_assumptions_ = saved_assumptions;
 }
 
 // ============================================================================
@@ -347,10 +473,6 @@ void SemanticAnalyzer::analyze_fn(const FnStmt& stmt) {
 // ============================================================================
 
 void SemanticAnalyzer::analyze_ld(const LdStmt& stmt) {
-    // ld infers return type from body — we do a two-pass approach:
-    // First pass: define the function symbol with Unknown return
-    // Second pass: analyze body, then update return type
-
     std::vector<std::shared_ptr<Type>> param_types;
     for (const auto& p : stmt.params) {
         param_types.push_back(resolve_param_type(p.type_name));
@@ -367,13 +489,14 @@ void SemanticAnalyzer::analyze_ld(const LdStmt& stmt) {
     fn_sym->is_tco = true;
     current_scope_->define(stmt.name, fn_sym);
 
-    // Analyze body
     ScopeGuard guard(this, current_scope_.get());
 
     auto saved_return = current_return_type_;
     auto saved_in_fn = inside_function_;
+    auto saved_assumptions = current_assumptions_;
     current_return_type_ = Type::make(Type::Kind::Unknown);
     inside_function_ = true;
+    current_assumptions_.clear();
 
     for (size_t i = 0; i < stmt.params.size(); ++i) {
         auto p = std::make_shared<Symbol>();
@@ -381,7 +504,6 @@ void SemanticAnalyzer::analyze_ld(const LdStmt& stmt) {
         p->kind = SymbolKind::Parameter;
         p->type = fn_type->param_types[i];
 
-        // Handle default values
         if (stmt.params[i].default_value) {
             auto default_type = analyze_expr(*stmt.params[i].default_value);
             if (!default_type->is_subtype_of(p->type)) {
@@ -397,11 +519,11 @@ void SemanticAnalyzer::analyze_ld(const LdStmt& stmt) {
 
     analyze_stmt(stmt.body);
 
-    // Update the function's return type based on what we inferred
     fn_type->return_type = current_return_type_;
 
     current_return_type_ = saved_return;
     inside_function_ = saved_in_fn;
+    current_assumptions_ = saved_assumptions;
 }
 
 // ============================================================================
@@ -411,7 +533,6 @@ void SemanticAnalyzer::analyze_ld(const LdStmt& stmt) {
 void SemanticAnalyzer::analyze_for(const ForStmt& stmt) {
     auto iterable_type = analyze_expr(stmt.iterable);
 
-    // Determine element type
     std::shared_ptr<Type> elem_type;
     if (iterable_type->kind == Type::Kind::List) {
         if (!iterable_type->params.empty()) {
@@ -420,7 +541,6 @@ void SemanticAnalyzer::analyze_for(const ForStmt& stmt) {
             elem_type = Type::make(Type::Kind::Unknown);
         }
     } else if (iterable_type->kind == Type::Kind::String) {
-        // String iteration yields String (characters)
         elem_type = Type::make(Type::Kind::String);
     } else if (iterable_type->kind == Type::Kind::Unknown) {
         elem_type = Type::make(Type::Kind::Unknown);
@@ -433,22 +553,24 @@ void SemanticAnalyzer::analyze_for(const ForStmt& stmt) {
     ScopeGuard guard(this, current_scope_.get());
 
     auto saved_in_loop = inside_loop_;
+    auto saved_assumptions = current_assumptions_;
     inside_loop_ = true;
 
     auto binding = std::make_shared<Symbol>();
     binding->name = stmt.binding;
     binding->kind = SymbolKind::LoopVar;
     binding->type = elem_type;
-    binding->is_mutable = false;  // loop vars are immutable
+    binding->is_mutable = false;
     current_scope_->define(stmt.binding, binding);
 
     analyze_stmt(stmt.body);
 
     inside_loop_ = saved_in_loop;
+    current_assumptions_ = saved_assumptions;
 }
 
 // ============================================================================
-// IF
+// IF (with flow-sensitive RBT)
 // ============================================================================
 
 void SemanticAnalyzer::analyze_if(const IfStmt& stmt) {
@@ -458,10 +580,24 @@ void SemanticAnalyzer::analyze_if(const IfStmt& stmt) {
             "if condition must be Bool, got \"" + cond_type->to_string() + "\"");
     }
 
-    analyze_stmt(stmt.then_branch);
+    // Extract assumptions from condition
+    auto positive_assumptions = extract_positive_assumptions(stmt.condition);
+    auto negative_assumptions = extract_negative_assumptions(stmt.condition);
+
+    // Merge current assumptions with positive ones for then-branch
+    auto then_assumptions = current_assumptions_;
+    then_assumptions.insert(then_assumptions.end(),
+        positive_assumptions.begin(), positive_assumptions.end());
+
+    analyze_stmt(stmt.then_branch, then_assumptions);
 
     if (stmt.else_branch) {
-        analyze_stmt(stmt.else_branch);
+        // Merge current assumptions with negative ones for else-branch
+        auto else_assumptions = current_assumptions_;
+        else_assumptions.insert(else_assumptions.end(),
+            negative_assumptions.begin(), negative_assumptions.end());
+
+        analyze_stmt(stmt.else_branch, else_assumptions);
     }
 }
 
@@ -475,7 +611,6 @@ void SemanticAnalyzer::analyze_match(const MatchStmt& stmt) {
     bool has_wildcard = false;
 
     for (const auto& arm : stmt.arms) {
-        // Analyze pattern
         std::shared_ptr<Type> pattern_type;
         if (auto lit = dynamic_cast<LiteralExpr*>(arm.pattern.get())) {
             pattern_type = analyze_literal(*lit);
@@ -484,7 +619,6 @@ void SemanticAnalyzer::analyze_match(const MatchStmt& stmt) {
                 has_wildcard = true;
                 pattern_type = Type::make(Type::Kind::Unknown);
             } else {
-                // Binding pattern — binds the scrutinee's type
                 pattern_type = scrutinee_type;
                 ScopeGuard guard(this, current_scope_.get());
                 auto sym = std::make_shared<Symbol>();
@@ -493,7 +627,7 @@ void SemanticAnalyzer::analyze_match(const MatchStmt& stmt) {
                 sym->type = scrutinee_type;
                 current_scope_->define(ident->name, sym);
                 analyze_expr(arm.body);
-                continue;  // body already analyzed
+                continue;
             }
         } else {
             error(arm.pattern->line, arm.pattern->column,
@@ -501,7 +635,6 @@ void SemanticAnalyzer::analyze_match(const MatchStmt& stmt) {
             pattern_type = Type::make(Type::Kind::Error);
         }
 
-        // Check pattern compatibility
         if (!pattern_type->is_subtype_of(scrutinee_type) &&
             !scrutinee_type->is_subtype_of(pattern_type)) {
             warning(arm.pattern->line, arm.pattern->column,
@@ -523,13 +656,11 @@ void SemanticAnalyzer::analyze_match(const MatchStmt& stmt) {
 // ============================================================================
 
 void SemanticAnalyzer::analyze_import(const ImportStmt& stmt) {
-    // For now, just validate that imported names don't conflict
     for (const auto& name : stmt.names) {
         if (current_scope_->lookup_local(name)) {
             error(stmt.line, stmt.column,
                 "imported name \"" + name + "\" conflicts with existing binding");
         }
-        // Mark as Unknown for now — resolved at link/load time
         auto sym = std::make_shared<Symbol>();
         sym->name = name;
         sym->kind = SymbolKind::Variable;
@@ -552,7 +683,6 @@ void SemanticAnalyzer::analyze_return(const ReturnStmt& stmt) {
         ret_type = Type::make(Type::Kind::Nil);
     }
 
-    // Update inferred return type (for ld functions)
     if (current_return_type_->kind == Type::Kind::Unknown) {
         current_return_type_ = ret_type;
     } else if (!ret_type->is_subtype_of(current_return_type_)) {
@@ -582,45 +712,46 @@ void SemanticAnalyzer::analyze_continue(const ContinueStmt& stmt) {
 // ============================================================================
 
 std::shared_ptr<Type> SemanticAnalyzer::analyze_expr(const ExprPtr& expr) {
+    return analyze_expr(expr, current_assumptions_);
+}
+
+std::shared_ptr<Type> SemanticAnalyzer::analyze_expr(const ExprPtr& expr, const AssumptionSet& assumptions) {
+    auto saved = current_assumptions_;
+    current_assumptions_ = assumptions;
+
+    std::shared_ptr<Type> result;
+
     if (auto lit = dynamic_cast<LiteralExpr*>(expr.get())) {
-        return analyze_literal(*lit);
-    }
-    if (auto ident = dynamic_cast<IdentExpr*>(expr.get())) {
-        return analyze_ident(*ident);
-    }
-    if (auto unary = dynamic_cast<UnaryExpr*>(expr.get())) {
-        return analyze_unary(*unary);
-    }
-    if (auto binary = dynamic_cast<BinaryExpr*>(expr.get())) {
-        return analyze_binary(*binary);
-    }
-    if (auto call = dynamic_cast<CallExpr*>(expr.get())) {
-        return analyze_call(*call);
-    }
-    if (auto index = dynamic_cast<IndexExpr*>(expr.get())) {
-        return analyze_index(*index);
-    }
-    if (auto member = dynamic_cast<MemberExpr*>(expr.get())) {
-        return analyze_member(*member);
-    }
-    if (auto group = dynamic_cast<GroupExpr*>(expr.get())) {
-        return analyze_group(*group);
-    }
-    if (auto range = dynamic_cast<RangeExpr*>(expr.get())) {
-        return analyze_range(*range);
-    }
-    if (auto lambda = dynamic_cast<LambdaExpr*>(expr.get())) {
-        return analyze_lambda(*lambda);
-    }
-    if (auto match = dynamic_cast<MatchExpr*>(expr.get())) {
-        return analyze_match_expr(*match);
-    }
-    if (auto rbt = dynamic_cast<RbtExpr*>(expr.get())) {
-        return analyze_rbt(*rbt);
+        result = analyze_literal(*lit);
+    } else if (auto ident = dynamic_cast<IdentExpr*>(expr.get())) {
+        result = analyze_ident(*ident, assumptions);
+    } else if (auto unary = dynamic_cast<UnaryExpr*>(expr.get())) {
+        result = analyze_unary(*unary);
+    } else if (auto binary = dynamic_cast<BinaryExpr*>(expr.get())) {
+        result = analyze_binary(*binary);
+    } else if (auto call = dynamic_cast<CallExpr*>(expr.get())) {
+        result = analyze_call(*call);
+    } else if (auto index = dynamic_cast<IndexExpr*>(expr.get())) {
+        result = analyze_index(*index);
+    } else if (auto member = dynamic_cast<MemberExpr*>(expr.get())) {
+        result = analyze_member(*member);
+    } else if (auto group = dynamic_cast<GroupExpr*>(expr.get())) {
+        result = analyze_group(*group);
+    } else if (auto range = dynamic_cast<RangeExpr*>(expr.get())) {
+        result = analyze_range(*range);
+    } else if (auto lambda = dynamic_cast<LambdaExpr*>(expr.get())) {
+        result = analyze_lambda(*lambda);
+    } else if (auto match = dynamic_cast<MatchExpr*>(expr.get())) {
+        result = analyze_match_expr(*match);
+    } else if (auto rbt = dynamic_cast<RbtExpr*>(expr.get())) {
+        result = analyze_rbt(*rbt, assumptions);
+    } else {
+        error(expr->line, expr->column, "unknown expression type in semantic analyzer");
+        result = Type::make(Type::Kind::Error);
     }
 
-    error(expr->line, expr->column, "unknown expression type in semantic analyzer");
-    return Type::make(Type::Kind::Error);
+    current_assumptions_ = saved;
+    return result;
 }
 
 // ============================================================================
@@ -639,12 +770,23 @@ std::shared_ptr<Type> SemanticAnalyzer::analyze_literal(const LiteralExpr& expr)
 }
 
 std::shared_ptr<Type> SemanticAnalyzer::analyze_ident(const IdentExpr& expr) {
+    return analyze_ident(expr, current_assumptions_);
+}
+
+std::shared_ptr<Type> SemanticAnalyzer::analyze_ident(const IdentExpr& expr, const AssumptionSet& assumptions) {
     auto sym = current_scope_->lookup(expr.name);
     if (!sym) {
         error(expr.line, expr.column,
             "undefined variable \"" + expr.name + "\"");
         return Type::make(Type::Kind::Error);
     }
+
+    // Check flow-sensitive assumptions for narrowing
+    auto known = get_known_type(expr.name, assumptions);
+    if (!known->equals(sym->type) && known->kind != Type::Kind::Unknown) {
+        return known;
+    }
+
     return sym->type;
 }
 
@@ -834,7 +976,6 @@ std::shared_ptr<Type> SemanticAnalyzer::analyze_range(const RangeExpr& expr) {
         return Type::make(Type::Kind::Error);
     }
 
-    // Range expression yields List<Integer>
     return Type::make_list(Type::make(Type::Kind::Integer));
 }
 
@@ -857,13 +998,14 @@ std::shared_ptr<Type> SemanticAnalyzer::analyze_lambda(const LambdaExpr& expr) {
 
     auto fn_type = Type::make_function(std::move(param_types), ret_type);
 
-    // Analyze body in new scope
     ScopeGuard guard(this, current_scope_.get());
 
     auto saved_return = current_return_type_;
     auto saved_in_fn = inside_function_;
+    auto saved_assumptions = current_assumptions_;
     current_return_type_ = ret_type;
     inside_function_ = true;
+    current_assumptions_.clear();
 
     for (size_t i = 0; i < expr.params.size(); ++i) {
         auto p = std::make_shared<Symbol>();
@@ -875,13 +1017,13 @@ std::shared_ptr<Type> SemanticAnalyzer::analyze_lambda(const LambdaExpr& expr) {
 
     analyze_stmt(expr.body);
 
-    // Update return type if inferred
     if (ret_type->kind == Type::Kind::Unknown) {
         fn_type->return_type = current_return_type_;
     }
 
     current_return_type_ = saved_return;
     inside_function_ = saved_in_fn;
+    current_assumptions_ = saved_assumptions;
 
     return fn_type;
 }
@@ -939,14 +1081,25 @@ std::shared_ptr<Type> SemanticAnalyzer::analyze_match_expr(const MatchExpr& expr
 }
 
 // ============================================================================
-// RBT
+// RBT (with flow-sensitive support)
 // ============================================================================
 
 std::shared_ptr<Type> SemanticAnalyzer::analyze_rbt(const RbtExpr& expr) {
+    return analyze_rbt(expr, current_assumptions_);
+}
+
+std::shared_ptr<Type> SemanticAnalyzer::analyze_rbt(const RbtExpr& expr, const AssumptionSet& assumptions) {
     auto operand_type = analyze_expr(expr.operand);
+
+    // Check if operand is an identifier we have assumptions about
+    std::string operand_name;
+    if (auto ident = dynamic_cast<IdentExpr*>(expr.operand.get())) {
+        operand_name = ident->name;
+    }
+
     auto target_type = resolve_type(expr.type_name);
 
-    auto result = compute_rbt_action(operand_type, target_type, expr.op);
+    auto result = compute_rbt_action(operand_type, target_type, expr.op, assumptions, operand_name);
 
     switch (result.action) {
         case RbtAction::Elide:
@@ -966,10 +1119,21 @@ std::shared_ptr<Type> SemanticAnalyzer::analyze_rbt(const RbtExpr& expr) {
 RbtResult SemanticAnalyzer::compute_rbt_action(
     const std::shared_ptr<Type>& operand_type,
     const std::shared_ptr<Type>& target_type,
-    RbtExpr::Op op
+    RbtExpr::Op op,
+    const AssumptionSet& assumptions,
+    const std::string& operand_name
 ) {
     RbtResult result;
     result.narrowed_type = target_type;
+
+    // FLOW-SENSITIVE: Check if assumptions already prove this
+    if (!operand_name.empty()) {
+        if (assumptions_imply_type(operand_name, target_type, assumptions)) {
+            result.action = RbtAction::Elide;
+            result.reason = "flow-sensitive elide: assumed from branch condition";
+            return result;
+        }
+    }
 
     if (operand_type->kind == Type::Kind::Error) {
         result.action = RbtAction::Elide;
